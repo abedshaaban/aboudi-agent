@@ -44,6 +44,7 @@ import * as DesktopSshEnvironment from "./ssh/DesktopSshEnvironment.ts";
 import * as DesktopSshPasswordPrompts from "./ssh/DesktopSshPasswordPrompts.ts";
 import * as DesktopState from "./app/DesktopState.ts";
 import * as DesktopTrelloWorkflow from "./trello/DesktopTrelloWorkflow.ts";
+import * as TrelloMediaProtocol from "./trello/TrelloMediaProtocol.ts";
 import * as DesktopUpdates from "./updates/DesktopUpdates.ts";
 import * as DesktopWindow from "./window/DesktopWindow.ts";
 
@@ -108,13 +109,17 @@ const electronLayer = Layer.mergeAll(
   Layer.succeed(DesktopIpc.DesktopIpc, DesktopIpc.make(Electron.ipcMain)),
 );
 
+const desktopTrelloLayer = TrelloMediaProtocol.layer.pipe(
+  Layer.provideMerge(DesktopTrelloWorkflow.layer),
+);
+
 const desktopFoundationLayer = Layer.mergeAll(
   DesktopState.layer,
   DesktopLifecycle.layerShutdown,
   DesktopAppSettings.layer,
   DesktopClientSettings.layer,
   DesktopSavedEnvironments.layer,
-  DesktopTrelloWorkflow.layer,
+  desktopTrelloLayer,
   DesktopCloudAuthTokenStore.layer,
   DesktopAssets.layer,
   DesktopObservability.layer,
@@ -145,7 +150,10 @@ const desktopApplicationLayer = Layer.mergeAll(
   desktopSshLayer,
 ).pipe(Layer.provideMerge(DesktopUpdates.layer), Layer.provideMerge(desktopBackendLayer));
 
-const desktopRuntimeLayer = ElectronProtocol.layerSchemePrivileges.pipe(
+const desktopRuntimeLayer = Layer.mergeAll(
+  ElectronProtocol.layerSchemePrivileges,
+  TrelloMediaProtocol.layerSchemePrivileges,
+).pipe(
   Layer.flatMap(() =>
     desktopApplicationLayer.pipe(
       Layer.provideMerge(NodeServices.layer),

@@ -58,7 +58,13 @@ interface TrelloWorkflowDocument {
   readonly queue: TrelloQueueStatus;
 }
 
+export interface TrelloCredentials {
+  readonly apiKey: string;
+  readonly token: string;
+}
+
 export interface DesktopTrelloWorkflowShape {
+  readonly getCredentials: () => Effect.Effect<TrelloCredentials>;
   readonly getSnapshot: () => Effect.Effect<TrelloWorkflowSnapshot>;
   readonly updateSettings: (
     input: TrelloSettingsUpdateInput,
@@ -471,6 +477,17 @@ export const layer = Layer.effect(
     };
 
     return DesktopTrelloWorkflow.of({
+      getCredentials: () =>
+        Effect.tryPromise({
+          try: async () => {
+            const document = await readDocument();
+            return {
+              apiKey: await decryptSecret(document.encryptedApiKey),
+              token: await decryptSecret(document.encryptedToken),
+            };
+          },
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+        }),
       getSnapshot: () =>
         Effect.tryPromise({
           try: async () => snapshotFromDocument(await readDocument()),

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2Icon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ClipboardListIcon,
+  FileIcon,
   FilterIcon,
   Loader2Icon,
   MessageSquareIcon,
@@ -28,6 +31,8 @@ import type {
   TrelloWorkflowJobId,
   TrelloWorkflowSnapshot,
 } from "@t3tools/contracts";
+
+import { resolveTrelloMediaPreviewUrl } from "@t3tools/shared/trelloMediaUrl";
 
 import { ensureLocalApi } from "../../localApi";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
@@ -117,6 +122,184 @@ function memberInitials(member: TrelloMember) {
   const parts = source.split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
   return source.slice(0, 2).toUpperCase() || "?";
+}
+
+function memberDisplayName(member: TrelloMember) {
+  return member.fullName || member.username;
+}
+
+type TrelloAttachment = TrelloCard["attachments"][number];
+
+function isImageAttachment(attachment: TrelloAttachment) {
+  if (attachment.mimeType?.startsWith("image/")) return true;
+  return /\.(avif|gif|jpe?g|png|svg|webp)(\?|$)/i.test(attachment.url);
+}
+
+function attachmentExtension(attachment: TrelloAttachment) {
+  const fromName = attachment.name.split(".").pop()?.toLowerCase();
+  if (fromName && fromName !== attachment.name.toLowerCase()) return fromName;
+  try {
+    const pathname = new URL(attachment.url).pathname;
+    const fromUrl = pathname.split(".").pop()?.toLowerCase();
+    if (fromUrl && fromUrl !== pathname.toLowerCase()) return fromUrl;
+  } catch {
+    // Ignore invalid attachment URLs and fall back to the generic label.
+  }
+  return null;
+}
+
+function attachmentKind(attachment: TrelloAttachment) {
+  const mime = attachment.mimeType?.toLowerCase() ?? "";
+  const extension = attachmentExtension(attachment);
+
+  if (mime.includes("pdf") || extension === "pdf") {
+    return { label: "PDF", tone: "bg-red-500/15 text-red-700 dark:text-red-300" };
+  }
+  if (mime.includes("xml") || extension === "xml") {
+    return { label: "XML", tone: "bg-orange-500/15 text-orange-700 dark:text-orange-300" };
+  }
+  if (mime.includes("json") || extension === "json") {
+    return { label: "JSON", tone: "bg-amber-500/15 text-amber-800 dark:text-amber-300" };
+  }
+  if (mime.includes("csv") || extension === "csv") {
+    return { label: "CSV", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" };
+  }
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    extension === "xls" ||
+    extension === "xlsx"
+  ) {
+    return { label: "XLS", tone: "bg-green-500/15 text-green-700 dark:text-green-300" };
+  }
+  if (
+    mime.includes("word") ||
+    mime.includes("document") ||
+    extension === "doc" ||
+    extension === "docx"
+  ) {
+    return { label: "DOC", tone: "bg-blue-500/15 text-blue-700 dark:text-blue-300" };
+  }
+  if (mime.includes("zip") || mime.includes("compressed") || extension === "zip") {
+    return { label: "ZIP", tone: "bg-violet-500/15 text-violet-700 dark:text-violet-300" };
+  }
+  if (mime.includes("text/plain") || extension === "txt") {
+    return { label: "TXT", tone: "bg-muted text-muted-foreground" };
+  }
+  if (extension === "md" || extension === "markdown") {
+    return { label: "MD", tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300" };
+  }
+  if (mime.includes("html") || extension === "html" || extension === "htm") {
+    return { label: "HTML", tone: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300" };
+  }
+  if (extension) {
+    return {
+      label: extension.slice(0, 4).toUpperCase(),
+      tone: "bg-muted text-muted-foreground",
+    };
+  }
+  return { label: "FILE", tone: "bg-muted text-muted-foreground" };
+}
+
+function formatAttachmentSize(bytes: number | null) {
+  if (bytes === null || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function FileAttachmentCard({ attachment }: { readonly attachment: TrelloAttachment }) {
+  const kind = attachmentKind(attachment);
+  const size = formatAttachmentSize(attachment.bytes);
+  return (
+    <a
+      href={attachment.url}
+      target="_blank"
+      rel="noreferrer"
+      className="flex min-w-0 items-center gap-3 rounded-md border border-border/60 bg-muted/20 p-3 transition-colors hover:border-border hover:bg-muted/40"
+    >
+      <div
+        className={`flex size-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md border border-border/50 bg-background ${kind.tone}`}
+      >
+        <FileIcon className="size-3.5 opacity-70" />
+        <span className="text-[10px] font-bold leading-none">{kind.label}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-foreground">{attachment.name}</div>
+        <div className="mt-0.5 text-xs text-muted-foreground">
+          {size ? `${kind.label} · ${size}` : kind.label}
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function MemberAvatar({
+  member,
+  size = "sm",
+}: {
+  readonly member: TrelloMember;
+  readonly size?: "sm" | "md";
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const sizeClass = size === "sm" ? "size-6 text-[10px]" : "size-8 text-xs";
+  const name = memberDisplayName(member);
+  const avatarSrc = resolveTrelloMediaPreviewUrl(member.avatarUrl);
+  if (avatarSrc && !imageFailed) {
+    return (
+      <img
+        src={avatarSrc}
+        alt={name}
+        title={name}
+        className={`${sizeClass} shrink-0 rounded-full border border-background object-cover`}
+        onError={() => setImageFailed(true)}
+      />
+    );
+  }
+  return (
+    <span
+      className={`inline-flex ${sizeClass} shrink-0 items-center justify-center rounded-full border border-background bg-muted font-semibold text-foreground`}
+      title={name}
+    >
+      {memberInitials(member)}
+    </span>
+  );
+}
+
+function TrelloImagePreview({
+  src,
+  alt,
+  className,
+  draggable,
+}: {
+  readonly src: string;
+  readonly alt: string;
+  readonly className?: string;
+  readonly draggable?: boolean;
+}) {
+  const previewSrc = resolveTrelloMediaPreviewUrl(src);
+  if (!previewSrc) return null;
+  return (
+    <img src={previewSrc} alt={alt} className={className} loading="lazy" draggable={draggable} />
+  );
+}
+
+function LabelChips({ labels }: { readonly labels: readonly TrelloLabel[] }) {
+  if (labels.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {labels.map((label) => (
+        <span
+          key={label.id}
+          className={`inline-flex max-w-full items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${labelTone(label)}`}
+          title={label.name || label.color || "Label"}
+        >
+          <TagsIcon className="size-2.5 shrink-0" />
+          <span className="truncate">{label.name || label.color || "label"}</span>
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function cardMatchesFeature(card: TrelloCard, feature: BoardFeatureFilter) {
@@ -612,39 +795,57 @@ function CardDetail({
   readonly onClose: () => void;
   readonly onAdd: () => void;
 }) {
+  const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
+  const imageAttachments = card.attachments.filter(isImageAttachment);
+  const fileAttachments = card.attachments.filter((attachment) => !isImageAttachment(attachment));
+  const checklistsWithItems = card.checklists.filter((checklist) => checklist.items.length > 0);
+  const hasDescription = card.desc.trim().length > 0;
+
   return (
-    <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-xl">
-      <div className="flex items-center gap-2 border-b border-border p-4">
-        <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">{card.name}</h2>
-          <p className="text-xs text-muted-foreground">{listName}</p>
+    <>
+      <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-xl">
+        <div className="flex items-center gap-2 border-b border-border p-4">
+          <div className="min-w-0">
+            <h2 className="truncate text-sm font-semibold">{card.name}</h2>
+            <p className="text-xs text-muted-foreground">{listName}</p>
+          </div>
+          <Button size="sm" className="ml-auto" onClick={onAdd}>
+            Add to Stack
+          </Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
         </div>
-        <Button size="sm" className="ml-auto" onClick={onAdd}>
-          Add to Stack
-        </Button>
-        <Button size="sm" variant="ghost" onClick={onClose}>
-          Close
-        </Button>
-      </div>
-      <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4 text-sm">
-        <MetaRow
-          label="Labels"
-          value={
-            card.labels.map((label) => label.name || label.color || label.id).join(", ") || "None"
-          }
-        />
-        <MetaRow
-          label="Members"
-          value={
-            cardMembers.map((member) => member.fullName || member.username).join(", ") || "None"
-          }
-        />
-        <DetailBlock title="Description">{card.desc || "No description."}</DetailBlock>
-        <DetailBlock title="Comments">
-          {card.comments.length === 0
-            ? "No comments."
-            : card.comments.map((comment) => (
+        <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4 text-sm">
+          {card.labels.length > 0 ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Labels</h3>
+              <LabelChips labels={card.labels} />
+            </section>
+          ) : null}
+          {cardMembers.length > 0 ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                Members
+              </h3>
+              <div className="flex flex-wrap gap-2">
+                {cardMembers.map((member) => (
+                  <div
+                    key={member.id}
+                    className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/30 py-1 pl-1 pr-2.5"
+                  >
+                    <MemberAvatar member={member} size="md" />
+                    <span className="text-sm text-foreground/85">{memberDisplayName(member)}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+          {hasDescription ? <DetailBlock title="Description">{card.desc}</DetailBlock> : null}
+          {card.comments.length > 0 ? (
+            <DetailBlock title="Comments">
+              {card.comments.map((comment) => (
                 <div key={comment.id} className="mb-3 rounded-md border border-border/60 p-2">
                   <div className="text-xs font-medium">
                     {comment.memberCreatorName ?? "Trello"} ·{" "}
@@ -655,11 +856,11 @@ function CardDetail({
                   </p>
                 </div>
               ))}
-        </DetailBlock>
-        <DetailBlock title="Checklists">
-          {card.checklists.length === 0
-            ? "No checklists."
-            : card.checklists.map((checklist) => (
+            </DetailBlock>
+          ) : null}
+          {checklistsWithItems.length > 0 ? (
+            <DetailBlock title="Checklists">
+              {checklistsWithItems.map((checklist) => (
                 <div key={checklist.id} className="mb-3">
                   <div className="text-xs font-semibold">{checklist.name}</div>
                   {checklist.items.map((item) => (
@@ -674,20 +875,150 @@ function CardDetail({
                   ))}
                 </div>
               ))}
-        </DetailBlock>
-        <DetailBlock title="Attachments">
-          {card.attachments.length === 0
-            ? "No attachments."
-            : card.attachments.map((attachment) => (
-                <a
-                  key={attachment.id}
-                  href={attachment.url}
-                  className="mb-2 block truncate text-sm text-primary underline"
-                >
-                  {attachment.name}
-                </a>
-              ))}
-        </DetailBlock>
+            </DetailBlock>
+          ) : null}
+          {imageAttachments.length > 0 ? (
+            <DetailBlock title="Images">
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {imageAttachments.map((attachment, index) => (
+                  <button
+                    key={attachment.id}
+                    type="button"
+                    className="group overflow-hidden rounded-md border border-border/60 bg-muted/20 text-left transition-colors hover:border-border hover:bg-muted/40"
+                    onClick={() => setLightboxIndex(index)}
+                  >
+                    <TrelloImagePreview
+                      src={attachment.url}
+                      alt={attachment.name}
+                      className="aspect-[4/3] w-full object-cover transition-transform group-hover:scale-[1.02]"
+                    />
+                    <span className="block truncate px-2 py-1 text-[11px] text-muted-foreground">
+                      {attachment.name}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </DetailBlock>
+          ) : null}
+          {fileAttachments.length > 0 ? (
+            <DetailBlock title="Attachments">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {fileAttachments.map((attachment) => (
+                  <FileAttachmentCard key={attachment.id} attachment={attachment} />
+                ))}
+              </div>
+            </DetailBlock>
+          ) : null}
+        </div>
+      </div>
+      {lightboxIndex !== null ? (
+        <AttachmentImageLightbox
+          attachments={imageAttachments}
+          index={lightboxIndex}
+          onClose={() => setLightboxIndex(null)}
+          onIndexChange={setLightboxIndex}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function AttachmentImageLightbox({
+  attachments,
+  index,
+  onClose,
+  onIndexChange,
+}: {
+  readonly attachments: readonly TrelloCard["attachments"][number][];
+  readonly index: number;
+  readonly onClose: () => void;
+  readonly onIndexChange: (index: number) => void;
+}) {
+  const attachment = attachments[index];
+  const hasMultiple = attachments.length > 1;
+
+  useEffect(() => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (!hasMultiple) return;
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        onIndexChange((index - 1 + attachments.length) % attachments.length);
+        return;
+      }
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        onIndexChange((index + 1) % attachments.length);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [attachments.length, hasMultiple, index, onClose, onIndexChange]);
+
+  if (!attachment) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-[2.5vh]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Image preview"
+    >
+      <button
+        type="button"
+        className="absolute inset-0 cursor-zoom-out"
+        aria-label="Close image preview"
+        onClick={onClose}
+      />
+      <div className="relative z-10 flex h-[95vh] w-[95vw] flex-col items-center justify-center">
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="absolute right-2 top-2 z-20 text-white/90 hover:bg-white/10 hover:text-white"
+          onClick={onClose}
+          aria-label="Close image preview"
+        >
+          <XIcon />
+        </Button>
+        {hasMultiple ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="absolute left-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:left-4"
+            aria-label="Previous image"
+            onClick={() => onIndexChange((index - 1 + attachments.length) % attachments.length)}
+          >
+            <ChevronLeftIcon className="size-5" />
+          </Button>
+        ) : null}
+        <TrelloImagePreview
+          src={attachment.url}
+          alt={attachment.name}
+          className="max-h-full max-w-full select-none rounded-lg object-contain shadow-2xl"
+          draggable={false}
+        />
+        <p className="mt-3 max-w-full truncate text-center text-xs text-white/80">
+          {attachment.name}
+          {hasMultiple ? ` (${index + 1}/${attachments.length})` : ""}
+        </p>
+        {hasMultiple ? (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:right-4"
+            aria-label="Next image"
+            onClick={() => onIndexChange((index + 1) % attachments.length)}
+          >
+            <ChevronRightIcon className="size-5" />
+          </Button>
+        ) : null}
       </div>
     </div>
   );
@@ -817,17 +1148,8 @@ function BoardCard({
       onClick={onSelect}
     >
       {card.labels.length > 0 ? (
-        <div className="mb-2 flex flex-wrap gap-1">
-          {card.labels.slice(0, 5).map((label) => (
-            <span
-              key={label.id}
-              className={`inline-flex max-w-full items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${labelTone(label)}`}
-              title={label.name || label.color || "Label"}
-            >
-              <TagsIcon className="size-2.5 shrink-0" />
-              <span className="truncate">{label.name || label.color || "label"}</span>
-            </span>
-          ))}
+        <div className="mb-2">
+          <LabelChips labels={card.labels.slice(0, 5)} />
         </div>
       ) : null}
       <div className="line-clamp-2 text-xs font-medium">{card.name}</div>
@@ -855,13 +1177,7 @@ function BoardCard({
         {cardMembers.length > 0 ? (
           <div className="flex shrink-0 -space-x-1" aria-label={`${cardMembers.length} members`}>
             {cardMembers.slice(0, 4).map((member) => (
-              <span
-                key={member.id}
-                className="inline-flex size-6 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold text-foreground"
-                title={member.fullName || member.username}
-              >
-                {memberInitials(member)}
-              </span>
+              <MemberAvatar key={member.id} member={member} />
             ))}
             {cardMembers.length > 4 ? (
               <span className="inline-flex size-6 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold text-muted-foreground">
@@ -1198,7 +1514,7 @@ function DetailBlock({
   children,
 }: {
   readonly title: string;
-  readonly children: React.ReactNode;
+  readonly children: ReactNode;
 }) {
   return (
     <section>
