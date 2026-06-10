@@ -15,8 +15,11 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardListIcon,
+  EyeIcon,
   FileIcon,
   FilterIcon,
+  LayersIcon,
+  ListOrderedIcon,
   Loader2Icon,
   MessageSquareIcon,
   PaperclipIcon,
@@ -31,6 +34,7 @@ import {
   XIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  type LucideIcon,
 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import type {
@@ -166,6 +170,102 @@ function stackStateTone(state: TrelloJobState) {
   return "bg-muted text-muted-foreground";
 }
 
+type CardWorkflowBadgeKind = "stack" | "queue" | "review";
+
+type CardWorkflowBadge = {
+  readonly kind: CardWorkflowBadgeKind;
+  readonly label: string;
+  readonly icon: LucideIcon;
+  readonly borderClass: string;
+  readonly chipClass: string;
+  readonly pulse?: boolean;
+};
+
+const stackOnlyStates = new Set<TrelloJobState>(["selected", "planning", "ready_for_queue"]);
+const queueActiveStates = new Set<TrelloJobState>(["queued", "running"]);
+const reviewStates = new Set<TrelloJobState>(["needs_review", "waiting_for_user", "failed"]);
+
+function resolveCardWorkflowBadge(
+  snapshot: TrelloWorkflowSnapshot,
+  cardId: string,
+): CardWorkflowBadge | null {
+  const queueJob = snapshot.queue.jobs.find((job) => job.cardId === cardId);
+  if (queueJob) {
+    if (reviewStates.has(queueJob.state)) {
+      return {
+        kind: "review",
+        label:
+          queueJob.state === "failed"
+            ? "Failed"
+            : queueJob.state === "waiting_for_user"
+              ? "Awaiting input"
+              : "Needs review",
+        icon: EyeIcon,
+        borderClass: "border-l-amber-500",
+        chipClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+        pulse: queueJob.state === "needs_review",
+      };
+    }
+    if (queueActiveStates.has(queueJob.state)) {
+      return {
+        kind: "queue",
+        label: queueJob.state === "running" ? "Running" : "In queue",
+        icon: queueJob.state === "running" ? Loader2Icon : ListOrderedIcon,
+        borderClass: "border-l-sky-500",
+        chipClass: "bg-sky-500/15 text-sky-800 dark:text-sky-300",
+      };
+    }
+  }
+
+  const stackItem = snapshot.stackItems.find((item) => item.cardId === cardId);
+  if (stackItem && stackOnlyStates.has(stackItem.state)) {
+    return {
+      kind: "stack",
+      label: "In stack",
+      icon: LayersIcon,
+      borderClass: "border-l-violet-500",
+      chipClass: "bg-violet-500/15 text-violet-800 dark:text-violet-300",
+    };
+  }
+
+  return null;
+}
+
+function buildCardWorkflowIndex(snapshot: TrelloWorkflowSnapshot) {
+  const cardIds = new Set<string>();
+  for (const item of snapshot.stackItems) cardIds.add(item.cardId);
+  for (const job of snapshot.queue.jobs) cardIds.add(job.cardId);
+  const index = new Map<string, CardWorkflowBadge>();
+  for (const cardId of cardIds) {
+    const badge = resolveCardWorkflowBadge(snapshot, cardId);
+    if (badge) index.set(cardId, badge);
+  }
+  return index;
+}
+
+function CardWorkflowStatusChip({ badge }: { readonly badge: CardWorkflowBadge }) {
+  const Icon = badge.icon;
+  return (
+    <span
+      className={cn(
+        "inline-flex max-w-full items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        badge.chipClass,
+      )}
+      title={badge.label}
+    >
+      {badge.pulse ? (
+        <span className="relative flex size-2 shrink-0">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-current opacity-40" />
+          <span className="relative inline-flex size-2 rounded-full bg-current" />
+        </span>
+      ) : (
+        <Icon className={cn("size-3 shrink-0", badge.icon === Loader2Icon && "animate-spin")} />
+      )}
+      <span className="truncate">{badge.label}</span>
+    </span>
+  );
+}
+
 type TrelloAttachment = TrelloCard["attachments"][number];
 
 function isImageAttachment(attachment: TrelloAttachment) {
@@ -191,16 +291,28 @@ function attachmentKind(attachment: TrelloAttachment) {
   const extension = attachmentExtension(attachment);
 
   if (mime.includes("pdf") || extension === "pdf") {
-    return { label: "PDF", tone: "bg-red-500/15 text-red-700 dark:text-red-300" };
+    return {
+      label: "PDF",
+      tone: "bg-red-500/15 text-red-700 dark:text-red-300",
+    };
   }
   if (mime.includes("xml") || extension === "xml") {
-    return { label: "XML", tone: "bg-orange-500/15 text-orange-700 dark:text-orange-300" };
+    return {
+      label: "XML",
+      tone: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
+    };
   }
   if (mime.includes("json") || extension === "json") {
-    return { label: "JSON", tone: "bg-amber-500/15 text-amber-800 dark:text-amber-300" };
+    return {
+      label: "JSON",
+      tone: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+    };
   }
   if (mime.includes("csv") || extension === "csv") {
-    return { label: "CSV", tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" };
+    return {
+      label: "CSV",
+      tone: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+    };
   }
   if (
     mime.includes("spreadsheet") ||
@@ -208,7 +320,10 @@ function attachmentKind(attachment: TrelloAttachment) {
     extension === "xls" ||
     extension === "xlsx"
   ) {
-    return { label: "XLS", tone: "bg-green-500/15 text-green-700 dark:text-green-300" };
+    return {
+      label: "XLS",
+      tone: "bg-green-500/15 text-green-700 dark:text-green-300",
+    };
   }
   if (
     mime.includes("word") ||
@@ -216,19 +331,31 @@ function attachmentKind(attachment: TrelloAttachment) {
     extension === "doc" ||
     extension === "docx"
   ) {
-    return { label: "DOC", tone: "bg-blue-500/15 text-blue-700 dark:text-blue-300" };
+    return {
+      label: "DOC",
+      tone: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+    };
   }
   if (mime.includes("zip") || mime.includes("compressed") || extension === "zip") {
-    return { label: "ZIP", tone: "bg-violet-500/15 text-violet-700 dark:text-violet-300" };
+    return {
+      label: "ZIP",
+      tone: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
+    };
   }
   if (mime.includes("text/plain") || extension === "txt") {
     return { label: "TXT", tone: "bg-muted text-muted-foreground" };
   }
   if (extension === "md" || extension === "markdown") {
-    return { label: "MD", tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300" };
+    return {
+      label: "MD",
+      tone: "bg-sky-500/15 text-sky-700 dark:text-sky-300",
+    };
   }
   if (mime.includes("html") || extension === "html" || extension === "htm") {
-    return { label: "HTML", tone: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300" };
+    return {
+      label: "HTML",
+      tone: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300",
+    };
   }
   if (extension) {
     return {
@@ -497,7 +624,10 @@ function SettingsPanel({
     try {
       await persistPendingSettings();
       const result = await getClient().testConnection();
-      toastManager.add({ type: result.ok ? "success" : "error", title: result.message });
+      toastManager.add({
+        type: result.ok ? "success" : "error",
+        title: result.message,
+      });
       await reload();
     } catch (cause) {
       notifyError("Trello connection failed", cause);
@@ -841,6 +971,7 @@ function BoardPanel({
     }
     return byList;
   }, [filteredCards]);
+  const cardWorkflowByCardId = useMemo(() => buildCardWorkflowIndex(snapshot), [snapshot]);
 
   const resetFilters = () => {
     setQuery("");
@@ -872,6 +1003,9 @@ function BoardPanel({
   const selectedCardInStack = selectedCard
     ? snapshot.stackItems.some((item) => item.cardId === selectedCard.id)
     : false;
+  const selectedCardWorkflowBadge = selectedCard
+    ? (cardWorkflowByCardId.get(selectedCard.id) ?? null)
+    : null;
 
   const viewInStack = (cardId: string) => {
     setSelectedCard(null);
@@ -916,7 +1050,10 @@ function BoardPanel({
         onPrimary={credentialsMissing || credentialIssue ? goToSettings : syncFromBoard}
         {...(credentialsMissing || credentialIssue
           ? {}
-          : { secondaryLabel: "Open Trello Settings", onSecondary: goToSettings })}
+          : {
+              secondaryLabel: "Open Trello Settings",
+              onSecondary: goToSettings,
+            })}
         busy={syncing}
       />
     );
@@ -972,6 +1109,39 @@ function BoardPanel({
           onReset={resetFilters}
           hasActiveFilters={hasActiveFilters}
         />
+        {cardWorkflowByCardId.size > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+            <span className="font-medium uppercase tracking-wide">Workflow</span>
+            <CardWorkflowStatusChip
+              badge={{
+                kind: "stack",
+                label: "In stack",
+                icon: LayersIcon,
+                borderClass: "border-l-violet-500",
+                chipClass: "bg-violet-500/15 text-violet-800 dark:text-violet-300",
+              }}
+            />
+            <CardWorkflowStatusChip
+              badge={{
+                kind: "queue",
+                label: "In queue",
+                icon: ListOrderedIcon,
+                borderClass: "border-l-sky-500",
+                chipClass: "bg-sky-500/15 text-sky-800 dark:text-sky-300",
+              }}
+            />
+            <CardWorkflowStatusChip
+              badge={{
+                kind: "review",
+                label: "Needs review",
+                icon: EyeIcon,
+                borderClass: "border-l-amber-500",
+                chipClass: "bg-amber-500/15 text-amber-800 dark:text-amber-300",
+                pulse: true,
+              }}
+            />
+          </div>
+        ) : null}
       </div>
       <div
         ref={boardScroll.ref}
@@ -1000,6 +1170,7 @@ function BoardPanel({
                     key={card.id}
                     card={card}
                     members={snapshot.cache.members}
+                    workflowBadge={cardWorkflowByCardId.get(card.id) ?? null}
                     onSelect={() => setSelectedCard(card)}
                   />
                 ))}
@@ -1020,6 +1191,7 @@ function BoardPanel({
           }
           members={snapshot.cache.members}
           isInStack={selectedCardInStack}
+          workflowBadge={selectedCardWorkflowBadge}
           onClose={() => setSelectedCard(null)}
           onAdd={() => addToStack(selectedCard.id)}
           onRemove={() => removeFromStack(selectedCard.id)}
@@ -1192,6 +1364,7 @@ function CardDetail({
   listName,
   members,
   isInStack,
+  workflowBadge,
   onClose,
   onAdd,
   onRemove,
@@ -1201,6 +1374,7 @@ function CardDetail({
   readonly listName: string;
   readonly members: TrelloWorkflowSnapshot["cache"]["members"];
   readonly isInStack: boolean;
+  readonly workflowBadge: CardWorkflowBadge | null;
   readonly onClose: () => void;
   readonly onAdd: () => void;
   readonly onRemove: () => void;
@@ -1233,7 +1407,12 @@ function CardDetail({
             {listName}
           </p>
         ) : null}
-        <div className={cn("min-w-0", listName ? "mt-1" : "mt-3")}>
+        {workflowBadge ? (
+          <div className={listName ? "mt-2" : "mt-3"}>
+            <CardWorkflowStatusChip badge={workflowBadge} />
+          </div>
+        ) : null}
+        <div className={cn("min-w-0", listName || workflowBadge ? "mt-1" : "mt-3")}>
           <h2 className="break-words text-base font-semibold leading-snug">{card.name}</h2>
         </div>
       </header>
@@ -1667,10 +1846,12 @@ function BoardFilters({
 function BoardCard({
   card,
   members,
+  workflowBadge,
   onSelect,
 }: {
   readonly card: TrelloCard;
   readonly members: readonly TrelloMember[];
+  readonly workflowBadge: CardWorkflowBadge | null;
   readonly onSelect: () => void;
 }) {
   const progress = checklistProgress(card);
@@ -1678,9 +1859,17 @@ function BoardCard({
   return (
     <button
       type="button"
-      className="cursor-pointer rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-muted/50"
+      className={cn(
+        "cursor-pointer rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-muted/50",
+        workflowBadge ? cn("border-l-[3px]", workflowBadge.borderClass) : null,
+      )}
       onClick={onSelect}
     >
+      {workflowBadge ? (
+        <div className="mb-2">
+          <CardWorkflowStatusChip badge={workflowBadge} />
+        </div>
+      ) : null}
       {card.labels.length > 0 ? (
         <div className="mb-2">
           <LabelChips labels={card.labels.slice(0, 5)} />
@@ -1816,9 +2005,16 @@ function StackPanel({
     if (!active) return;
     setBusy(true);
     try {
-      await getClient().updateStackItem({ jobId: active.jobId, plan, state: "ready_for_queue" });
+      await getClient().updateStackItem({
+        jobId: active.jobId,
+        plan,
+        state: "ready_for_queue",
+      });
       if (moveToQueue) await getClient().moveToQueue({ jobId: active.jobId });
-      toastManager.add({ type: "success", title: moveToQueue ? "Moved to Queue" : "Plan saved" });
+      toastManager.add({
+        type: "success",
+        title: moveToQueue ? "Moved to Queue" : "Plan saved",
+      });
       await reload();
     } catch (cause) {
       notifyError("Failed to update stack item", cause);
