@@ -2268,51 +2268,55 @@ function StackPanel({
       </aside>
       {active ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="shrink-0 border-b border-border/60 px-4 py-3">
-            <div className="flex flex-wrap items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <h2 className="break-words text-sm font-semibold">
-                  {active.cardSnapshot.name}
-                </h2>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                  {listName ? <span>{listName}</span> : null}
-                  <span
-                    className={cn(
-                      "inline-flex rounded-sm px-1.5 py-0.5 text-[10px] font-medium capitalize",
-                      stackStateTone(active.state),
-                    )}
-                  >
-                    {formatTrelloJobState(active.state)}
-                  </span>
-                  <a
-                    className="text-primary underline"
-                    href={active.cardSnapshot.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open in Trello
-                  </a>
-                </div>
+          <header className="shrink-0 border-b border-border px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {listName ? (
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    {listName}
+                  </p>
+                ) : null}
+                <span
+                  className={cn(
+                    "inline-flex rounded-sm px-1.5 py-0.5 text-[10px] font-medium capitalize",
+                    stackStateTone(active.state),
+                  )}
+                >
+                  {formatTrelloJobState(active.state)}
+                </span>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={remove}
-                disabled={busy}
-              >
-                <Trash2Icon className="size-3.5" />
-                Remove
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button size="sm" onClick={() => save(false)} disabled={busy}>
+                  {busy ? (
+                    <Loader2Icon className="size-3.5 animate-spin" />
+                  ) : null}
+                  Save plan
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => save(true)}
+                  disabled={busy}
+                >
+                  Move to Queue
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={remove}
+                  disabled={busy}
+                >
+                  Remove from Stack
+                </Button>
+              </div>
             </div>
           </header>
           <div className="min-h-0 flex-1 overflow-y-auto">
             <section className="border-b border-border/60 p-4">
-              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Ticket overview
-              </h3>
               <TrelloCardBody
                 card={active.cardSnapshot}
                 members={snapshot.cache.members}
+                showTitle
               />
             </section>
             <section className="bg-muted/10 p-4">
@@ -2328,20 +2332,6 @@ function StackPanel({
               <PlanEditor plan={plan} onChange={setPlan} />
             </section>
           </div>
-          <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border/60 bg-background px-4 py-3">
-            <Button size="sm" onClick={() => save(false)} disabled={busy}>
-              {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
-              Save plan
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => save(true)}
-              disabled={busy}
-            >
-              Move to Queue
-            </Button>
-          </footer>
         </div>
       ) : null}
     </div>
