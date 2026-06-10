@@ -601,6 +601,61 @@ function SettingsPanel({
   );
 }
 
+function isBoardDragBlockedTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return true;
+  return target.closest("button, a, input, textarea, select, [role='button']") !== null;
+}
+
+function useHorizontalDragScroll<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const sessionRef = useRef<{
+    pointerId: number;
+    startX: number;
+    scrollLeft: number;
+  } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const onPointerDown = useCallback((event: ReactPointerEvent<T>) => {
+    if (event.button !== 0 || isBoardDragBlockedTarget(event.target)) return;
+    const element = ref.current;
+    if (!element) return;
+    sessionRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      scrollLeft: element.scrollLeft,
+    };
+    setIsDragging(true);
+    element.setPointerCapture(event.pointerId);
+  }, []);
+
+  const onPointerMove = useCallback((event: ReactPointerEvent<T>) => {
+    const session = sessionRef.current;
+    const element = ref.current;
+    if (!session || !element || session.pointerId !== event.pointerId) return;
+    element.scrollLeft = session.scrollLeft - (event.clientX - session.startX);
+  }, []);
+
+  const endDrag = useCallback((event: ReactPointerEvent<T>) => {
+    const session = sessionRef.current;
+    const element = ref.current;
+    if (!session || !element || session.pointerId !== event.pointerId) return;
+    sessionRef.current = null;
+    setIsDragging(false);
+    if (element.hasPointerCapture(event.pointerId)) {
+      element.releasePointerCapture(event.pointerId);
+    }
+  }, []);
+
+  return {
+    ref,
+    isDragging,
+    onPointerDown,
+    onPointerMove,
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+  };
+}
+
 function BoardPanel({
   snapshot,
   reload,
@@ -609,6 +664,7 @@ function BoardPanel({
   readonly reload: () => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const boardScroll = useHorizontalDragScroll<HTMLDivElement>();
   const [selectedCard, setSelectedCard] = useState<TrelloCard | null>(null);
   const [credentialIssue, setCredentialIssue] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -758,7 +814,17 @@ function BoardPanel({
           hasActiveFilters={hasActiveFilters}
         />
       </div>
-      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
+      <div
+        ref={boardScroll.ref}
+        className={cn(
+          "flex min-h-0 flex-1 gap-3 overflow-x-auto p-3",
+          boardScroll.isDragging ? "cursor-grabbing select-none" : "cursor-grab",
+        )}
+        onPointerDown={boardScroll.onPointerDown}
+        onPointerMove={boardScroll.onPointerMove}
+        onPointerUp={boardScroll.onPointerUp}
+        onPointerCancel={boardScroll.onPointerCancel}
+      >
         {snapshot.cache.lists
           .filter((list) => !list.closed)
           .map((list) => (
@@ -1417,7 +1483,8 @@ function BoardCard({
   const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
   return (
     <button
-      className="rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-accent"
+      type="button"
+      className="cursor-pointer rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-muted/50"
       onClick={onSelect}
     >
       {card.labels.length > 0 ? (

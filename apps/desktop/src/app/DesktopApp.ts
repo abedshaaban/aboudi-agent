@@ -33,7 +33,7 @@ const makeDesktopRunId = Crypto.Crypto.pipe(
   Effect.map((value) => value.replaceAll("-", "").slice(0, 12)),
 );
 
-class DesktopBackendPortUnavailableError extends Data.TaggedError(
+export class DesktopBackendPortUnavailableError extends Data.TaggedError(
   "DesktopBackendPortUnavailableError",
 )<{
   readonly startPort: number;
@@ -42,6 +42,17 @@ class DesktopBackendPortUnavailableError extends Data.TaggedError(
 }> {
   override get message() {
     return `No desktop backend port is available on hosts ${this.hosts.join(", ")} between ${this.startPort} and ${this.maxPort}.`;
+  }
+}
+
+export class ConfiguredDesktopBackendPortUnavailableError extends Data.TaggedError(
+  "ConfiguredDesktopBackendPortUnavailableError",
+)<{
+  readonly port: number;
+  readonly hosts: readonly string[];
+}> {
+  override get message() {
+    return `Configured desktop backend port ${this.port} is already in use on hosts ${this.hosts.join(", ")}. Stop the process using it or choose a different T3CODE_PORT.`;
   }
 }
 
@@ -59,28 +70,37 @@ const { logInfo: logBootstrapInfo, logWarning: logBootstrapWarning } =
 const { logInfo: logStartupInfo, logError: logStartupError } =
   DesktopObservability.makeComponentLogger("desktop-startup");
 
-const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(function* (
+const isDesktopBackendPortAvailable = Effect.fn("isDesktopBackendPortAvailable")(function* (
+  port: number,
+) {
+  const net = yield* NetService.NetService;
+  for (const host of DESKTOP_BACKEND_PORT_PROBE_HOSTS) {
+    if (!(yield* net.canListenOnHost(port, host))) {
+      return false;
+    }
+  }
+  return true;
+});
+
+export const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(function* (
   configuredPort: Option.Option<number>,
 ) {
   if (Option.isSome(configuredPort)) {
+    if (!(yield* isDesktopBackendPortAvailable(configuredPort.value))) {
+      return yield* new ConfiguredDesktopBackendPortUnavailableError({
+        port: configuredPort.value,
+        hosts: DESKTOP_BACKEND_PORT_PROBE_HOSTS,
+      });
+    }
+
     return {
       port: configuredPort.value,
       selectedByScan: false,
     } as const;
   }
 
-  const net = yield* NetService.NetService;
   for (let port = DEFAULT_DESKTOP_BACKEND_PORT; port <= MAX_TCP_PORT; port += 1) {
-    let availableOnEveryHost = true;
-
-    for (const host of DESKTOP_BACKEND_PORT_PROBE_HOSTS) {
-      if (!(yield* net.canListenOnHost(port, host))) {
-        availableOnEveryHost = false;
-        break;
-      }
-    }
-
-    if (availableOnEveryHost) {
+    if (yield* isDesktopBackendPortAvailable(port)) {
       return {
         port,
         selectedByScan: true,
