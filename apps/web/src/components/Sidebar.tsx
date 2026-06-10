@@ -4,8 +4,12 @@ import {
   ChevronRightIcon,
   CloudIcon,
   FolderPlusIcon,
+  KanbanIcon,
+  ListChecksIcon,
+  ListTodoIcon,
   SearchIcon,
   SettingsIcon,
+  SquareKanbanIcon,
   SquarePenIcon,
   TerminalIcon,
   TriangleAlertIcon,
@@ -2517,6 +2521,58 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   );
 });
 
+const trelloNavItems = [
+  { to: "/trello-board", label: "Trello Board", icon: SquareKanbanIcon },
+  { to: "/trello-stack", label: "Stack / Planning", icon: ListChecksIcon },
+  { to: "/trello-queue", label: "Queue", icon: ListTodoIcon },
+  { to: "/trello-runs", label: "Job Review / Runs", icon: KanbanIcon },
+  { to: "/trello-settings", label: "Trello Settings", icon: SettingsIcon },
+] as const;
+
+function TrelloWorkflowNav() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const navigate = useNavigate();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleClick = useCallback(
+    (to: (typeof trelloNavItems)[number]["to"]) => {
+      if (isMobile) setOpenMobile(false);
+      void navigate({ to });
+    },
+    [isMobile, navigate, setOpenMobile],
+  );
+
+  return (
+    <SidebarGroup className="px-2 pt-2 pb-1">
+      <div className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+        Trello
+      </div>
+      <SidebarMenu>
+        {trelloNavItems.map((item) => {
+          const Icon = item.icon;
+          const active = pathname === item.to;
+          return (
+            <SidebarMenuItem key={item.to}>
+              <SidebarMenuButton
+                size="sm"
+                isActive={active}
+                className={
+                  active
+                    ? "gap-2 px-2 py-1.5 text-foreground"
+                    : "gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
+                }
+                onClick={() => handleClick(item.to)}
+              >
+                <Icon className="size-3.5" />
+                <span className="truncate text-xs">{item.label}</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          );
+        })}
+      </SidebarMenu>
+    </SidebarGroup>
+  );
+}
+
 interface SidebarProjectsContentProps {
   showArm64IntelBuildWarning: boolean;
   arm64IntelBuildWarningDescription: string | null;
@@ -2669,6 +2725,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
           </Alert>
         </SidebarGroup>
       ) : null}
+      <TrelloWorkflowNav />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">

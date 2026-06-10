@@ -177,6 +177,13 @@ function createLocalStorageStub(): Storage {
   };
 }
 
+const emptyTrelloSnapshot = {
+  settings: { boardRef: "", hasApiKey: false, hasToken: false, updatedAt: null },
+  cache: { board: null, lists: [], cards: [], labels: [], members: [], syncedAt: null },
+  stackItems: [],
+  queue: { parallelism: 1, running: false, jobs: [] },
+};
+
 function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
   return {
     getAppBranding: () => null,
@@ -245,6 +252,34 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       headers: {},
       body: "",
     }),
+    trelloGetSnapshot: async () => emptyTrelloSnapshot,
+    trelloUpdateSettings: async () => emptyTrelloSnapshot,
+    trelloListBoards: async () => ({ boards: [] }),
+    trelloTestConnection: async () => ({ ok: true, message: "ok" }),
+    trelloSyncBoard: async () => ({
+      syncedAt: "2026-01-01T00:00:00.000Z",
+      cardCount: 0,
+      listCount: 0,
+    }),
+    trelloAddToStack: async () => {
+      throw new Error("trelloAddToStack not implemented in test");
+    },
+    trelloUpdateStackItem: async () => {
+      throw new Error("trelloUpdateStackItem not implemented in test");
+    },
+    trelloMoveToQueue: async () => {
+      throw new Error("trelloMoveToQueue not implemented in test");
+    },
+    trelloStartQueue: async () => emptyTrelloSnapshot.queue,
+    trelloStopQueue: async () => emptyTrelloSnapshot.queue,
+    trelloPauseQueue: async () => emptyTrelloSnapshot.queue,
+    trelloRetryJob: async () => {
+      throw new Error("trelloRetryJob not implemented in test");
+    },
+    trelloRemoveJob: async () => undefined,
+    trelloCleanupJob: async () => {
+      throw new Error("trelloCleanupJob not implemented in test");
+    },
     onCloudAuthCallback: () => () => undefined,
     onMenuAction: () => () => undefined,
     getUpdateState: async () => {

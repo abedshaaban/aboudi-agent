@@ -40,6 +40,22 @@ import {
   setUpdateChannel,
 } from "./methods/updates.ts";
 import {
+  trelloAddToStack,
+  trelloCleanupJob,
+  trelloGetSnapshot,
+  trelloListBoards,
+  trelloMoveToQueue,
+  trelloPauseQueue,
+  trelloRemoveJob,
+  trelloRetryJob,
+  trelloStartQueue,
+  trelloStopQueue,
+  trelloSyncBoard,
+  trelloTestConnection,
+  trelloUpdateSettings,
+  trelloUpdateStackItem,
+} from "./methods/trelloWorkflow.ts";
+import {
   confirm,
   getAppBranding,
   getLocalEnvironmentBootstrap,
@@ -87,6 +103,20 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(setCloudAuthToken);
   yield* ipc.handle(clearCloudAuthToken);
   yield* ipc.handle(fetchCloudAuth);
+  yield* ipc.handle(trelloGetSnapshot);
+  yield* ipc.handle(trelloUpdateSettings);
+  yield* ipc.handle(trelloListBoards);
+  yield* ipc.handle(trelloTestConnection);
+  yield* ipc.handle(trelloSyncBoard);
+  yield* ipc.handle(trelloAddToStack);
+  yield* ipc.handle(trelloUpdateStackItem);
+  yield* ipc.handle(trelloMoveToQueue);
+  yield* ipc.handle(trelloStartQueue);
+  yield* ipc.handle(trelloStopQueue);
+  yield* ipc.handle(trelloPauseQueue);
+  yield* ipc.handle(trelloRetryJob);
+  yield* ipc.handle(trelloRemoveJob);
+  yield* ipc.handle(trelloCleanupJob);
   yield* ipc.handle(getUpdateState);
   yield* ipc.handle(setUpdateChannel);
   yield* ipc.handle(downloadUpdate);

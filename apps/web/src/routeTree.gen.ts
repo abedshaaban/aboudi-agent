@@ -9,6 +9,11 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TrelloStackRouteImport } from './routes/trello-stack'
+import { Route as TrelloSettingsRouteImport } from './routes/trello-settings'
+import { Route as TrelloRunsRouteImport } from './routes/trello-runs'
+import { Route as TrelloQueueRouteImport } from './routes/trello-queue'
+import { Route as TrelloBoardRouteImport } from './routes/trello-board'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as PairRouteImport } from './routes/pair'
 import { Route as ChatRouteImport } from './routes/_chat'
@@ -24,6 +29,31 @@ import { Route as SettingsArchivedRouteImport } from './routes/settings.archived
 import { Route as ChatDraftDraftIdRouteImport } from './routes/_chat.draft.$draftId'
 import { Route as ChatEnvironmentIdThreadIdRouteImport } from './routes/_chat.$environmentId.$threadId'
 
+const TrelloStackRoute = TrelloStackRouteImport.update({
+  id: '/trello-stack',
+  path: '/trello-stack',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrelloSettingsRoute = TrelloSettingsRouteImport.update({
+  id: '/trello-settings',
+  path: '/trello-settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrelloRunsRoute = TrelloRunsRouteImport.update({
+  id: '/trello-runs',
+  path: '/trello-runs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrelloQueueRoute = TrelloQueueRouteImport.update({
+  id: '/trello-queue',
+  path: '/trello-queue',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TrelloBoardRoute = TrelloBoardRouteImport.update({
+  id: '/trello-board',
+  path: '/trello-board',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -99,6 +129,11 @@ export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/trello-board': typeof TrelloBoardRoute
+  '/trello-queue': typeof TrelloQueueRoute
+  '/trello-runs': typeof TrelloRunsRoute
+  '/trello-settings': typeof TrelloSettingsRoute
+  '/trello-stack': typeof TrelloStackRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -113,6 +148,11 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/trello-board': typeof TrelloBoardRoute
+  '/trello-queue': typeof TrelloQueueRoute
+  '/trello-runs': typeof TrelloRunsRoute
+  '/trello-settings': typeof TrelloSettingsRoute
+  '/trello-stack': typeof TrelloStackRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -130,6 +170,11 @@ export interface FileRoutesById {
   '/_chat': typeof ChatRouteWithChildren
   '/pair': typeof PairRoute
   '/settings': typeof SettingsRouteWithChildren
+  '/trello-board': typeof TrelloBoardRoute
+  '/trello-queue': typeof TrelloQueueRoute
+  '/trello-runs': typeof TrelloRunsRoute
+  '/trello-settings': typeof TrelloSettingsRoute
+  '/trello-stack': typeof TrelloStackRoute
   '/settings/archived': typeof SettingsArchivedRoute
   '/settings/cloud': typeof SettingsCloudRoute
   '/settings/connections': typeof SettingsConnectionsRoute
@@ -148,6 +193,11 @@ export interface FileRouteTypes {
     | '/'
     | '/pair'
     | '/settings'
+    | '/trello-board'
+    | '/trello-queue'
+    | '/trello-runs'
+    | '/trello-settings'
+    | '/trello-stack'
     | '/settings/archived'
     | '/settings/cloud'
     | '/settings/connections'
@@ -162,6 +212,11 @@ export interface FileRouteTypes {
   to:
     | '/pair'
     | '/settings'
+    | '/trello-board'
+    | '/trello-queue'
+    | '/trello-runs'
+    | '/trello-settings'
+    | '/trello-stack'
     | '/settings/archived'
     | '/settings/cloud'
     | '/settings/connections'
@@ -178,6 +233,11 @@ export interface FileRouteTypes {
     | '/_chat'
     | '/pair'
     | '/settings'
+    | '/trello-board'
+    | '/trello-queue'
+    | '/trello-runs'
+    | '/trello-settings'
+    | '/trello-stack'
     | '/settings/archived'
     | '/settings/cloud'
     | '/settings/connections'
@@ -195,10 +255,50 @@ export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
   PairRoute: typeof PairRoute
   SettingsRoute: typeof SettingsRouteWithChildren
+  TrelloBoardRoute: typeof TrelloBoardRoute
+  TrelloQueueRoute: typeof TrelloQueueRoute
+  TrelloRunsRoute: typeof TrelloRunsRoute
+  TrelloSettingsRoute: typeof TrelloSettingsRoute
+  TrelloStackRoute: typeof TrelloStackRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/trello-stack': {
+      id: '/trello-stack'
+      path: '/trello-stack'
+      fullPath: '/trello-stack'
+      preLoaderRoute: typeof TrelloStackRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trello-settings': {
+      id: '/trello-settings'
+      path: '/trello-settings'
+      fullPath: '/trello-settings'
+      preLoaderRoute: typeof TrelloSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trello-runs': {
+      id: '/trello-runs'
+      path: '/trello-runs'
+      fullPath: '/trello-runs'
+      preLoaderRoute: typeof TrelloRunsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trello-queue': {
+      id: '/trello-queue'
+      path: '/trello-queue'
+      fullPath: '/trello-queue'
+      preLoaderRoute: typeof TrelloQueueRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/trello-board': {
+      id: '/trello-board'
+      path: '/trello-board'
+      fullPath: '/trello-board'
+      preLoaderRoute: typeof TrelloBoardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -344,6 +444,11 @@ const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
   PairRoute: PairRoute,
   SettingsRoute: SettingsRouteWithChildren,
+  TrelloBoardRoute: TrelloBoardRoute,
+  TrelloQueueRoute: TrelloQueueRoute,
+  TrelloRunsRoute: TrelloRunsRoute,
+  TrelloSettingsRoute: TrelloSettingsRoute,
+  TrelloStackRoute: TrelloStackRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

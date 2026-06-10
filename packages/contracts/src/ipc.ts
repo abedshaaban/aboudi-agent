@@ -80,6 +80,22 @@ import type {
   SourceControlRepositoryInfo,
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
+import type {
+  TrelloAddToStackInput,
+  TrelloListBoardsResult,
+  TrelloJobIdInput,
+  TrelloMoveToQueueInput,
+  TrelloQueueControlInput,
+  TrelloQueueJob,
+  TrelloQueueStatus,
+  TrelloSettingsUpdateInput,
+  TrelloStackItem,
+  TrelloStartQueueInput,
+  TrelloSyncResult,
+  TrelloTestConnectionResult,
+  TrelloUpdateStackItemInput,
+  TrelloWorkflowSnapshot,
+} from "./trello.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -444,6 +460,20 @@ export interface DesktopBridge {
   setCloudAuthToken: (token: string) => Promise<boolean>;
   clearCloudAuthToken: () => Promise<void>;
   fetchCloudAuth: (input: DesktopCloudAuthFetchInput) => Promise<DesktopCloudAuthFetchResult>;
+  trelloGetSnapshot: () => Promise<TrelloWorkflowSnapshot>;
+  trelloUpdateSettings: (input: TrelloSettingsUpdateInput) => Promise<TrelloWorkflowSnapshot>;
+  trelloListBoards: () => Promise<TrelloListBoardsResult>;
+  trelloTestConnection: () => Promise<TrelloTestConnectionResult>;
+  trelloSyncBoard: () => Promise<TrelloSyncResult>;
+  trelloAddToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
+  trelloUpdateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
+  trelloMoveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
+  trelloStartQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;
+  trelloStopQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
+  trelloPauseQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
+  trelloRetryJob: (input: TrelloJobIdInput) => Promise<TrelloQueueJob>;
+  trelloRemoveJob: (input: TrelloJobIdInput) => Promise<void>;
+  trelloCleanupJob: (input: TrelloJobIdInput) => Promise<TrelloQueueJob>;
   onCloudAuthCallback: (listener: (rawUrl: string) => void) => () => void;
   onMenuAction: (listener: (action: string) => void) => () => void;
   getUpdateState: () => Promise<DesktopUpdateState>;
@@ -489,6 +519,22 @@ export interface LocalApi {
     getSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<string | null>;
     setSavedEnvironmentSecret: (environmentId: EnvironmentId, secret: string) => Promise<boolean>;
     removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
+  };
+  trello: {
+    getSnapshot: () => Promise<TrelloWorkflowSnapshot>;
+    updateSettings: (input: TrelloSettingsUpdateInput) => Promise<TrelloWorkflowSnapshot>;
+    listBoards: () => Promise<TrelloListBoardsResult>;
+    testConnection: () => Promise<TrelloTestConnectionResult>;
+    syncBoard: () => Promise<TrelloSyncResult>;
+    addToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
+    updateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
+    moveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
+    startQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;
+    stopQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
+    pauseQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
+    retryJob: (input: TrelloJobIdInput) => Promise<TrelloQueueJob>;
+    removeJob: (input: TrelloJobIdInput) => Promise<void>;
+    cleanupJob: (input: TrelloJobIdInput) => Promise<TrelloQueueJob>;
   };
   server: {
     getConfig: () => Promise<ServerConfig>;

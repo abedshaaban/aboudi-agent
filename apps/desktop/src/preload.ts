@@ -102,6 +102,22 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(IpcChannels.SET_CLOUD_AUTH_TOKEN_CHANNEL, token),
   clearCloudAuthToken: () => ipcRenderer.invoke(IpcChannels.CLEAR_CLOUD_AUTH_TOKEN_CHANNEL),
   fetchCloudAuth: (input) => ipcRenderer.invoke(IpcChannels.FETCH_CLOUD_AUTH_CHANNEL, input),
+  trelloGetSnapshot: () => ipcRenderer.invoke(IpcChannels.TRELLO_GET_SNAPSHOT_CHANNEL),
+  trelloUpdateSettings: (input) =>
+    ipcRenderer.invoke(IpcChannels.TRELLO_UPDATE_SETTINGS_CHANNEL, input),
+  trelloListBoards: () => ipcRenderer.invoke(IpcChannels.TRELLO_LIST_BOARDS_CHANNEL),
+  trelloTestConnection: () => ipcRenderer.invoke(IpcChannels.TRELLO_TEST_CONNECTION_CHANNEL),
+  trelloSyncBoard: () => ipcRenderer.invoke(IpcChannels.TRELLO_SYNC_BOARD_CHANNEL),
+  trelloAddToStack: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_ADD_TO_STACK_CHANNEL, input),
+  trelloUpdateStackItem: (input) =>
+    ipcRenderer.invoke(IpcChannels.TRELLO_UPDATE_STACK_ITEM_CHANNEL, input),
+  trelloMoveToQueue: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_MOVE_TO_QUEUE_CHANNEL, input),
+  trelloStartQueue: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_START_QUEUE_CHANNEL, input),
+  trelloStopQueue: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_STOP_QUEUE_CHANNEL, input),
+  trelloPauseQueue: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_PAUSE_QUEUE_CHANNEL, input),
+  trelloRetryJob: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_RETRY_JOB_CHANNEL, input),
+  trelloRemoveJob: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_REMOVE_JOB_CHANNEL, input),
+  trelloCleanupJob: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_CLEANUP_JOB_CHANNEL, input),
   onCloudAuthCallback: (listener) => {
     const wrappedListener = (_event: Electron.IpcRendererEvent, rawUrl: unknown) => {
       if (typeof rawUrl !== "string") return;

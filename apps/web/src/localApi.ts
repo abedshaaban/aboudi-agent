@@ -118,6 +118,64 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         removeBrowserSavedEnvironmentSecret(environmentId);
       },
     },
+    trello: {
+      getSnapshot: () =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloGetSnapshot()
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      updateSettings: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloUpdateSettings(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      listBoards: () =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloListBoards()
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      testConnection: () =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloTestConnection()
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      syncBoard: () =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloSyncBoard()
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      addToStack: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloAddToStack(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      updateStackItem: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloUpdateStackItem(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      moveToQueue: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloMoveToQueue(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      startQueue: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloStartQueue(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      stopQueue: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloStopQueue(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      pauseQueue: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloPauseQueue(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      retryJob: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloRetryJob(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      removeJob: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloRemoveJob(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      cleanupJob: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloCleanupJob(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+    },
     server: {
       getConfig: () =>
         rpcClient ? rpcClient.server.getConfig() : Promise.reject(unavailableLocalBackendError()),
