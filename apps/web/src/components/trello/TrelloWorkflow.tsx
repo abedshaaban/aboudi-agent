@@ -32,14 +32,17 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
 } from "lucide-react";
+import { useShallow } from "zustand/react/shallow";
 import type {
   ProjectId,
   TrelloBoardSummary,
   TrelloCard,
   TrelloImplementationPlan,
+  TrelloJobState,
   TrelloLabel,
   TrelloMember,
   TrelloQueueJob,
+  TrelloStackItem,
   TrelloWorkflowJobId,
   TrelloWorkflowSnapshot,
 } from "@t3tools/contracts";
@@ -71,6 +74,7 @@ type BoardFeatureFilter = "all" | "comments" | "attachments" | "checklists" | "d
 
 interface TrelloWorkflowProps {
   readonly section: TrelloSection;
+  readonly stackCardId?: string;
 }
 
 const emptyPlan: TrelloImplementationPlan = {
@@ -149,6 +153,17 @@ function memberInitials(member: TrelloMember) {
 
 function memberDisplayName(member: TrelloMember) {
   return member.fullName || member.username;
+}
+
+function formatTrelloJobState(state: TrelloJobState) {
+  return state.replaceAll("_", " ");
+}
+
+function stackStateTone(state: TrelloJobState) {
+  if (state === "ready_for_queue")
+    return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+  if (state === "planning") return "bg-sky-500/15 text-sky-700 dark:text-sky-300";
+  return "bg-muted text-muted-foreground";
 }
 
 type TrelloAttachment = TrelloCard["attachments"][number];
@@ -365,7 +380,7 @@ function Header({
   );
 }
 
-export function TrelloWorkflow({ section }: TrelloWorkflowProps) {
+export function TrelloWorkflow({ section, stackCardId }: TrelloWorkflowProps) {
   const { snapshot, loading, error, reload, setSnapshot } = useTrelloSnapshot();
   const title =
     section === "board"
@@ -382,7 +397,12 @@ export function TrelloWorkflow({ section }: TrelloWorkflowProps) {
     <SidebarInset className="h-dvh min-h-0 overflow-hidden bg-background text-foreground">
       <div className="flex min-h-0 flex-1 flex-col">
         <Header title={title} onRefresh={reload} loading={loading} />
-        <main className="min-h-0 flex-1 overflow-auto">
+        <main
+          className={cn(
+            "min-h-0 flex-1",
+            section === "board" || section === "stack" ? "overflow-hidden" : "overflow-auto",
+          )}
+        >
           {error ? (
             <div className="m-4 rounded-lg border border-destructive/30 bg-destructive/8 p-3 text-sm text-destructive">
               {error}
@@ -399,6 +419,7 @@ export function TrelloWorkflow({ section }: TrelloWorkflowProps) {
               snapshot={snapshot}
               reload={reload}
               setSnapshot={setSnapshot}
+              {...(stackCardId ? { stackCardId } : {})}
             />
           ) : null}
         </main>
@@ -412,14 +433,23 @@ function Section({
   snapshot,
   reload,
   setSnapshot,
+  stackCardId,
 }: {
   readonly section: TrelloSection;
   readonly snapshot: TrelloWorkflowSnapshot;
   readonly reload: () => Promise<void>;
   readonly setSnapshot: (snapshot: TrelloWorkflowSnapshot) => void;
+  readonly stackCardId?: string;
 }) {
   if (section === "settings") return <SettingsPanel snapshot={snapshot} reload={reload} />;
-  if (section === "stack") return <StackPanel snapshot={snapshot} reload={reload} />;
+  if (section === "stack")
+    return (
+      <StackPanel
+        snapshot={snapshot}
+        reload={reload}
+        {...(stackCardId ? { initialCardId: stackCardId } : {})}
+      />
+    );
   if (section === "queue")
     return <QueuePanel snapshot={snapshot} reload={reload} setSnapshot={setSnapshot} />;
   if (section === "runs") return <RunsPanel snapshot={snapshot} reload={reload} />;
@@ -606,49 +636,159 @@ function isBoardDragBlockedTarget(target: EventTarget | null) {
   return target.closest("button, a, input, textarea, select, [role='button']") !== null;
 }
 
+const BOARD_DRAG_THRESHOLD_PX = 4;
+const BOARD_MOMENTUM_MIN_VELOCITY = 0.04;
+const BOARD_MOMENTUM_MAX_VELOCITY = 3.5;
+const BOARD_MOMENTUM_FRICTION = 0.95;
+
+type BoardDragSession = {
+  active: boolean;
+  pointerId: number;
+  scrollLeft: number;
+  startX: number;
+  startY: number;
+  lastX: number;
+  lastTime: number;
+  velocity: number;
+};
+
+function setBoardScrollDragging(element: HTMLElement, dragging: boolean) {
+  element.classList.toggle("cursor-grabbing", dragging);
+  element.classList.toggle("select-none", dragging);
+}
+
 function useHorizontalDragScroll<T extends HTMLElement>() {
   const ref = useRef<T>(null);
-  const sessionRef = useRef<{
-    pointerId: number;
-    startX: number;
-    scrollLeft: number;
-  } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const sessionRef = useRef<BoardDragSession | null>(null);
+  const momentumFrameRef = useRef<number | null>(null);
 
-  const onPointerDown = useCallback((event: ReactPointerEvent<T>) => {
-    if (event.button !== 0 || isBoardDragBlockedTarget(event.target)) return;
-    const element = ref.current;
-    if (!element) return;
-    sessionRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      scrollLeft: element.scrollLeft,
-    };
-    setIsDragging(true);
-    element.setPointerCapture(event.pointerId);
+  const stopMomentum = useCallback(() => {
+    if (momentumFrameRef.current === null) return;
+    cancelAnimationFrame(momentumFrameRef.current);
+    momentumFrameRef.current = null;
   }, []);
+
+  useEffect(() => () => stopMomentum(), [stopMomentum]);
+
+  const onPointerDown = useCallback(
+    (event: ReactPointerEvent<T>) => {
+      if (
+        event.button !== 0 ||
+        event.pointerType !== "mouse" ||
+        isBoardDragBlockedTarget(event.target)
+      ) {
+        return;
+      }
+      const element = ref.current;
+      if (!element) return;
+
+      stopMomentum();
+      const now = performance.now();
+      sessionRef.current = {
+        active: false,
+        pointerId: event.pointerId,
+        scrollLeft: element.scrollLeft,
+        startX: event.clientX,
+        startY: event.clientY,
+        lastX: event.clientX,
+        lastTime: now,
+        velocity: 0,
+      };
+    },
+    [stopMomentum],
+  );
 
   const onPointerMove = useCallback((event: ReactPointerEvent<T>) => {
     const session = sessionRef.current;
     const element = ref.current;
     if (!session || !element || session.pointerId !== event.pointerId) return;
+
+    const deltaX = event.clientX - session.startX;
+    const deltaY = event.clientY - session.startY;
+
+    if (!session.active) {
+      if (Math.hypot(deltaX, deltaY) < BOARD_DRAG_THRESHOLD_PX) return;
+      if (Math.abs(deltaY) > Math.abs(deltaX)) {
+        sessionRef.current = null;
+        return;
+      }
+      session.active = true;
+      session.scrollLeft = element.scrollLeft;
+      session.startX = event.clientX;
+      session.startY = event.clientY;
+      session.lastX = event.clientX;
+      session.lastTime = performance.now();
+      session.velocity = 0;
+      setBoardScrollDragging(element, true);
+      element.setPointerCapture(event.pointerId);
+    }
+
+    event.preventDefault();
     element.scrollLeft = session.scrollLeft - (event.clientX - session.startX);
+
+    const now = performance.now();
+    const dt = now - session.lastTime;
+    if (dt > 0) {
+      const instantVelocity = (event.clientX - session.lastX) / dt;
+      session.velocity = session.velocity * 0.65 + instantVelocity * 0.35;
+      session.lastX = event.clientX;
+      session.lastTime = now;
+    }
   }, []);
 
   const endDrag = useCallback((event: ReactPointerEvent<T>) => {
     const session = sessionRef.current;
     const element = ref.current;
     if (!session || !element || session.pointerId !== event.pointerId) return;
+
+    const wasActive = session.active;
+    const velocity = Math.max(
+      -BOARD_MOMENTUM_MAX_VELOCITY,
+      Math.min(BOARD_MOMENTUM_MAX_VELOCITY, session.velocity),
+    );
     sessionRef.current = null;
-    setIsDragging(false);
-    if (element.hasPointerCapture(event.pointerId)) {
-      element.releasePointerCapture(event.pointerId);
+
+    if (wasActive) {
+      setBoardScrollDragging(element, false);
+      if (element.hasPointerCapture(event.pointerId)) {
+        element.releasePointerCapture(event.pointerId);
+      }
+
+      if (Math.abs(velocity) >= BOARD_MOMENTUM_MIN_VELOCITY) {
+        let momentumVelocity = velocity;
+        let lastFrameTime = performance.now();
+        const maxScrollLeft = Math.max(0, element.scrollWidth - element.clientWidth);
+
+        const step = (now: number) => {
+          const dt = Math.min(now - lastFrameTime, 32);
+          lastFrameTime = now;
+
+          element.scrollLeft = Math.max(
+            0,
+            Math.min(maxScrollLeft, element.scrollLeft - momentumVelocity * dt),
+          );
+
+          if (element.scrollLeft <= 0 || element.scrollLeft >= maxScrollLeft) {
+            momentumFrameRef.current = null;
+            return;
+          }
+
+          momentumVelocity *= Math.pow(BOARD_MOMENTUM_FRICTION, dt / 16);
+          if (Math.abs(momentumVelocity) < BOARD_MOMENTUM_MIN_VELOCITY) {
+            momentumFrameRef.current = null;
+            return;
+          }
+
+          momentumFrameRef.current = requestAnimationFrame(step);
+        };
+
+        momentumFrameRef.current = requestAnimationFrame(step);
+      }
     }
   }, []);
 
   return {
     ref,
-    isDragging,
     onPointerDown,
     onPointerMove,
     onPointerUp: endDrag,
@@ -732,6 +872,11 @@ function BoardPanel({
   const selectedCardInStack = selectedCard
     ? snapshot.stackItems.some((item) => item.cardId === selectedCard.id)
     : false;
+
+  const viewInStack = (cardId: string) => {
+    setSelectedCard(null);
+    void navigate({ to: "/trello-stack", search: { cardId } });
+  };
 
   const goToSettings = () => {
     void navigate({ to: "/trello-settings" });
@@ -830,10 +975,7 @@ function BoardPanel({
       </div>
       <div
         ref={boardScroll.ref}
-        className={cn(
-          "flex min-h-0 flex-1 gap-3 overflow-x-auto p-3",
-          boardScroll.isDragging ? "cursor-grabbing select-none" : "cursor-grab",
-        )}
+        className="flex min-h-0 flex-1 cursor-grab touch-pan-y gap-3 overflow-x-auto overscroll-x-contain p-3"
         onPointerDown={boardScroll.onPointerDown}
         onPointerMove={boardScroll.onPointerMove}
         onPointerUp={boardScroll.onPointerUp}
@@ -881,28 +1023,19 @@ function BoardPanel({
           onClose={() => setSelectedCard(null)}
           onAdd={() => addToStack(selectedCard.id)}
           onRemove={() => removeFromStack(selectedCard.id)}
+          onViewInStack={() => viewInStack(selectedCard.id)}
         />
       ) : null}
     </div>
   );
 }
 
-function CardDetail({
+function TrelloCardBody({
   card,
-  listName,
   members,
-  isInStack,
-  onClose,
-  onAdd,
-  onRemove,
 }: {
   readonly card: TrelloCard;
-  readonly listName: string;
-  readonly members: TrelloWorkflowSnapshot["cache"]["members"];
-  readonly isInStack: boolean;
-  readonly onClose: () => void;
-  readonly onAdd: () => void;
-  readonly onRemove: () => void;
+  readonly members: readonly TrelloMember[];
 }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
@@ -936,132 +1069,111 @@ function CardDetail({
 
   return (
     <>
-      <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-xl">
-        <div className="flex items-start gap-2 border-b border-border p-4">
-          <div className="min-w-0 flex-1">
-            <h2 className="break-words text-sm font-semibold">{card.name}</h2>
-            <p className="text-xs text-muted-foreground">{listName}</p>
-          </div>
-          <Button
-            size="sm"
-            className="ml-auto"
-            variant={isInStack ? "outline" : "default"}
-            onClick={isInStack ? onRemove : onAdd}
-          >
-            {isInStack ? "Remove from Stack" : "Add to Stack"}
-          </Button>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            Close
-          </Button>
-        </div>
-        <div className="min-h-0 flex-1 space-y-5 overflow-auto p-4 text-sm">
-          {card.labels.length > 0 ? (
-            <section>
-              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Labels</h3>
-              <LabelChips labels={card.labels} />
-            </section>
-          ) : null}
-          {cardMembers.length > 0 ? (
-            <section>
-              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
-                Members
-              </h3>
-              <div className="flex flex-wrap gap-2">
-                {cardMembers.map((member) => (
-                  <div
-                    key={member.id}
-                    className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/30 py-1 pl-1 pr-2.5"
-                  >
-                    <MemberAvatar member={member} size="md" />
-                    <span className="text-sm text-foreground/85">{memberDisplayName(member)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
-          {hasDescription ? (
-            <section>
-              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
-                Description
-              </h3>
-              <TrelloMarkdown
-                text={card.desc}
-                imageIndexByUrl={imageIndexByUrl}
-                onImageClick={openLightbox}
-              />
-            </section>
-          ) : null}
-          {card.comments.length > 0 ? (
-            <DetailBlock title="Comments">
-              {card.comments.map((comment) => (
-                <div key={comment.id} className="mb-3 rounded-md border border-border/60 p-2">
-                  <div className="text-xs font-medium">
-                    {comment.memberCreatorName ?? "Trello"} ·{" "}
-                    {new Date(comment.date).toLocaleString()}
-                  </div>
-                  <div className="mt-1">
-                    <TrelloMarkdown
-                      text={comment.text}
-                      imageIndexByUrl={imageIndexByUrl}
-                      onImageClick={openLightbox}
-                    />
-                  </div>
+      <div className="space-y-5 text-sm">
+        {card.labels.length > 0 ? (
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Labels</h3>
+            <LabelChips labels={card.labels} />
+          </section>
+        ) : null}
+        {cardMembers.length > 0 ? (
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">Members</h3>
+            <div className="flex flex-wrap gap-2">
+              {cardMembers.map((member) => (
+                <div
+                  key={member.id}
+                  className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/30 py-1 pl-1 pr-2.5"
+                >
+                  <MemberAvatar member={member} size="md" />
+                  <span className="text-sm text-foreground/85">{memberDisplayName(member)}</span>
                 </div>
               ))}
-            </DetailBlock>
-          ) : null}
-          {checklistsWithItems.length > 0 ? (
-            <DetailBlock title="Checklists">
-              {checklistsWithItems.map((checklist) => (
-                <div key={checklist.id} className="mb-3">
-                  <div className="text-xs font-semibold">{checklist.name}</div>
-                  {checklist.items.map((item) => (
-                    <div key={item.id} className="mt-1 flex items-center gap-2 text-sm">
-                      {item.state === "complete" ? (
-                        <CheckCircle2Icon className="size-3.5 text-success" />
-                      ) : (
-                        <SquareIcon className="size-3.5 text-muted-foreground" />
-                      )}
-                      {item.name}
-                    </div>
-                  ))}
+            </div>
+          </section>
+        ) : null}
+        {hasDescription ? (
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+              Description
+            </h3>
+            <TrelloMarkdown
+              text={card.desc}
+              imageIndexByUrl={imageIndexByUrl}
+              onImageClick={openLightbox}
+            />
+          </section>
+        ) : null}
+        {card.comments.length > 0 ? (
+          <DetailBlock title="Comments">
+            {card.comments.map((comment) => (
+              <div key={comment.id} className="mb-3 rounded-md border border-border/60 p-2">
+                <div className="text-xs font-medium">
+                  {comment.memberCreatorName ?? "Trello"} ·{" "}
+                  {new Date(comment.date).toLocaleString()}
                 </div>
+                <div className="mt-1">
+                  <TrelloMarkdown
+                    text={comment.text}
+                    imageIndexByUrl={imageIndexByUrl}
+                    onImageClick={openLightbox}
+                  />
+                </div>
+              </div>
+            ))}
+          </DetailBlock>
+        ) : null}
+        {checklistsWithItems.length > 0 ? (
+          <DetailBlock title="Checklists">
+            {checklistsWithItems.map((checklist) => (
+              <div key={checklist.id} className="mb-3">
+                <div className="text-xs font-semibold">{checklist.name}</div>
+                {checklist.items.map((item) => (
+                  <div key={item.id} className="mt-1 flex items-center gap-2 text-sm">
+                    {item.state === "complete" ? (
+                      <CheckCircle2Icon className="size-3.5 text-success" />
+                    ) : (
+                      <SquareIcon className="size-3.5 text-muted-foreground" />
+                    )}
+                    {item.name}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </DetailBlock>
+        ) : null}
+        {imageAttachments.length > 0 ? (
+          <DetailBlock title="Images">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {imageAttachments.map((attachment) => (
+                <button
+                  key={attachment.id}
+                  type="button"
+                  className="group overflow-hidden rounded-md border border-border/60 bg-muted/20 text-left transition-colors hover:border-border hover:bg-muted/40"
+                  onClick={() => openLightboxForUrl(attachment.url)}
+                >
+                  <TrelloImagePreview
+                    src={attachment.url}
+                    alt={attachment.name}
+                    className="aspect-[4/3] w-full object-cover transition-transform group-hover:scale-[1.02]"
+                  />
+                  <span className="block truncate px-2 py-1 text-[11px] text-muted-foreground">
+                    {attachment.name}
+                  </span>
+                </button>
               ))}
-            </DetailBlock>
-          ) : null}
-          {imageAttachments.length > 0 ? (
-            <DetailBlock title="Images">
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {imageAttachments.map((attachment) => (
-                  <button
-                    key={attachment.id}
-                    type="button"
-                    className="group overflow-hidden rounded-md border border-border/60 bg-muted/20 text-left transition-colors hover:border-border hover:bg-muted/40"
-                    onClick={() => openLightboxForUrl(attachment.url)}
-                  >
-                    <TrelloImagePreview
-                      src={attachment.url}
-                      alt={attachment.name}
-                      className="aspect-[4/3] w-full object-cover transition-transform group-hover:scale-[1.02]"
-                    />
-                    <span className="block truncate px-2 py-1 text-[11px] text-muted-foreground">
-                      {attachment.name}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </DetailBlock>
-          ) : null}
-          {fileAttachments.length > 0 ? (
-            <DetailBlock title="Attachments">
-              <div className="grid gap-2 sm:grid-cols-2">
-                {fileAttachments.map((attachment) => (
-                  <FileAttachmentCard key={attachment.id} attachment={attachment} />
-                ))}
-              </div>
-            </DetailBlock>
-          ) : null}
-        </div>
+            </div>
+          </DetailBlock>
+        ) : null}
+        {fileAttachments.length > 0 ? (
+          <DetailBlock title="Attachments">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {fileAttachments.map((attachment) => (
+                <FileAttachmentCard key={attachment.id} attachment={attachment} />
+              ))}
+            </div>
+          </DetailBlock>
+        ) : null}
       </div>
       {lightboxIndex !== null ? (
         <CardImageLightbox
@@ -1072,6 +1184,63 @@ function CardDetail({
         />
       ) : null}
     </>
+  );
+}
+
+function CardDetail({
+  card,
+  listName,
+  members,
+  isInStack,
+  onClose,
+  onAdd,
+  onRemove,
+  onViewInStack,
+}: {
+  readonly card: TrelloCard;
+  readonly listName: string;
+  readonly members: TrelloWorkflowSnapshot["cache"]["members"];
+  readonly isInStack: boolean;
+  readonly onClose: () => void;
+  readonly onAdd: () => void;
+  readonly onRemove: () => void;
+  readonly onViewInStack: () => void;
+}) {
+  return (
+    <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-xl">
+      <header className="border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {isInStack ? (
+            <>
+              <Button size="sm" onClick={onViewInStack}>
+                View in Stack
+              </Button>
+              <Button size="sm" variant="outline" onClick={onRemove}>
+                Remove from Stack
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={onAdd}>
+              Add to Stack
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+        {listName ? (
+          <p className="mt-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {listName}
+          </p>
+        ) : null}
+        <div className={cn("min-w-0", listName ? "mt-1" : "mt-3")}>
+          <h2 className="break-words text-base font-semibold leading-snug">{card.name}</h2>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-auto p-4">
+        <TrelloCardBody card={card} members={members} />
+      </div>
+    </div>
   );
 }
 
@@ -1556,17 +1725,88 @@ function BoardCard({
   );
 }
 
+function StackSidebarItem({
+  item,
+  selected,
+  onSelect,
+}: {
+  readonly item: TrelloStackItem;
+  readonly selected: boolean;
+  readonly onSelect: () => void;
+}) {
+  const progress = checklistProgress(item.cardSnapshot);
+  const hasPlanContent = Object.values(item.plan).some((value) => value.trim().length > 0);
+  return (
+    <button
+      type="button"
+      className={cn(
+        "block w-full border-b border-border/60 px-3 py-2.5 text-left transition-colors",
+        selected ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60",
+      )}
+      onClick={onSelect}
+    >
+      <div className="truncate text-xs font-medium text-foreground">{item.cardSnapshot.name}</div>
+      {item.cardSnapshot.labels.length > 0 ? (
+        <div className="mt-1.5">
+          <LabelChips labels={item.cardSnapshot.labels.slice(0, 3)} />
+        </div>
+      ) : null}
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          className={cn(
+            "inline-flex rounded-sm px-1.5 py-0.5 text-[10px] font-medium capitalize",
+            stackStateTone(item.state),
+          )}
+        >
+          {formatTrelloJobState(item.state)}
+        </span>
+        {hasPlanContent ? (
+          <span className="text-[10px] text-muted-foreground">Notes added</span>
+        ) : null}
+        {progress.total > 0 ? (
+          <span className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+            <CheckCircle2Icon className="size-3" />
+            {progress.complete}/{progress.total}
+          </span>
+        ) : null}
+      </div>
+    </button>
+  );
+}
+
 function StackPanel({
   snapshot,
   reload,
+  initialCardId,
 }: {
   readonly snapshot: TrelloWorkflowSnapshot;
   readonly reload: () => Promise<void>;
+  readonly initialCardId?: string;
 }) {
-  const [editing, setEditing] = useState<TrelloWorkflowJobId | null>(null);
+  const resolveEditingFromCardId = useCallback(
+    (cardId: string | undefined): TrelloWorkflowJobId | null => {
+      if (!cardId) return null;
+      return snapshot.stackItems.find((item) => item.cardId === cardId)?.jobId ?? null;
+    },
+    [snapshot.stackItems],
+  );
+  const [editing, setEditing] = useState<TrelloWorkflowJobId | null>(() =>
+    resolveEditingFromCardId(initialCardId),
+  );
+
+  useEffect(() => {
+    if (!initialCardId) return;
+    const jobId = resolveEditingFromCardId(initialCardId);
+    if (jobId) setEditing(jobId);
+  }, [initialCardId, resolveEditingFromCardId]);
+  const [busy, setBusy] = useState(false);
   const active =
     snapshot.stackItems.find((item) => item.jobId === editing) ?? snapshot.stackItems[0] ?? null;
   const [plan, setPlan] = useState<TrelloImplementationPlan>(active?.plan ?? emptyPlan);
+  const listName =
+    active === null
+      ? ""
+      : (snapshot.cache.lists.find((list) => list.id === active.cardSnapshot.idList)?.name ?? "");
 
   useEffect(() => {
     setPlan(active?.plan ?? emptyPlan);
@@ -1574,6 +1814,7 @@ function StackPanel({
 
   const save = async (moveToQueue: boolean) => {
     if (!active) return;
+    setBusy(true);
     try {
       await getClient().updateStackItem({ jobId: active.jobId, plan, state: "ready_for_queue" });
       if (moveToQueue) await getClient().moveToQueue({ jobId: active.jobId });
@@ -1581,43 +1822,107 @@ function StackPanel({
       await reload();
     } catch (cause) {
       notifyError("Failed to update stack item", cause);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!active) return;
+    setBusy(true);
+    try {
+      await getClient().removeFromStack({ cardId: active.cardId });
+      toastManager.add({ type: "success", title: "Removed from Stack" });
+      setEditing(null);
+      await reload();
+    } catch (cause) {
+      notifyError("Failed to remove card from Stack", cause);
+    } finally {
+      setBusy(false);
     }
   };
 
   if (snapshot.stackItems.length === 0) return <EmptyState text="No stacked Trello tickets yet." />;
 
   return (
-    <div className="grid min-h-full grid-cols-1 md:grid-cols-[18rem_1fr]">
-      <aside className="border-b border-border md:border-b-0 md:border-r">
-        {snapshot.stackItems.map((item) => (
-          <button
-            key={item.jobId}
-            className={`block w-full border-b border-border/60 px-3 py-2 text-left text-xs ${active?.jobId === item.jobId ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60"}`}
-            onClick={() => setEditing(item.jobId)}
-          >
-            <div className="truncate font-medium">{item.cardSnapshot.name}</div>
-            <div className="mt-1">{item.state}</div>
-          </button>
-        ))}
+    <div className="flex h-full min-h-0 flex-col md:flex-row">
+      <aside className="flex w-full shrink-0 flex-col border-b border-border md:w-72 md:border-b-0 md:border-r">
+        <div className="border-b border-border/60 px-3 py-2 text-xs font-semibold text-muted-foreground">
+          Stack ({snapshot.stackItems.length})
+        </div>
+        <div className="max-h-48 min-h-0 overflow-y-auto md:max-h-none md:flex-1">
+          {snapshot.stackItems.map((item) => (
+            <StackSidebarItem
+              key={item.jobId}
+              item={item}
+              selected={active?.jobId === item.jobId}
+              onSelect={() => setEditing(item.jobId)}
+            />
+          ))}
+        </div>
       </aside>
       {active ? (
-        <section className="space-y-4 p-4">
-          <div>
-            <h2 className="text-sm font-semibold">{active.cardSnapshot.name}</h2>
-            <a className="text-xs text-primary underline" href={active.cardSnapshot.url}>
-              Original Trello card
-            </a>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="shrink-0 border-b border-border/60 px-4 py-3">
+            <div className="flex flex-wrap items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <h2 className="break-words text-sm font-semibold">{active.cardSnapshot.name}</h2>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  {listName ? <span>{listName}</span> : null}
+                  <span
+                    className={cn(
+                      "inline-flex rounded-sm px-1.5 py-0.5 text-[10px] font-medium capitalize",
+                      stackStateTone(active.state),
+                    )}
+                  >
+                    {formatTrelloJobState(active.state)}
+                  </span>
+                  <a
+                    className="text-primary underline"
+                    href={active.cardSnapshot.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Trello
+                  </a>
+                </div>
+              </div>
+              <Button size="sm" variant="ghost" onClick={remove} disabled={busy}>
+                <Trash2Icon className="size-3.5" />
+                Remove
+              </Button>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <section className="border-b border-border/60 p-4">
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Ticket overview
+              </h3>
+              <TrelloCardBody card={active.cardSnapshot} members={snapshot.cache.members} />
+            </section>
+            <section className="bg-muted/10 p-4">
+              <div className="mb-4">
+                <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  AI planning inputs
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Add notes and guidance for the agent. These fields are included in the prompt when
+                  the job runs from the queue.
+                </p>
+              </div>
+              <PlanEditor plan={plan} onChange={setPlan} />
+            </section>
           </div>
-          <PlanEditor plan={plan} onChange={setPlan} />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => save(false)}>
+          <footer className="flex shrink-0 flex-wrap gap-2 border-t border-border/60 bg-background px-4 py-3">
+            <Button size="sm" onClick={() => save(false)} disabled={busy}>
+              {busy ? <Loader2Icon className="size-3.5 animate-spin" /> : null}
               Save plan
             </Button>
-            <Button size="sm" variant="outline" onClick={() => save(true)}>
+            <Button size="sm" variant="outline" onClick={() => save(true)} disabled={busy}>
               Move to Queue
             </Button>
-          </div>
-        </section>
+          </footer>
+        </div>
       ) : null}
     </div>
   );
@@ -1633,7 +1938,7 @@ function QueuePanel({
   readonly setSnapshot: (snapshot: TrelloWorkflowSnapshot) => void;
 }) {
   const [parallelism, setParallelism] = useState(String(snapshot.queue.parallelism || 1));
-  const projects = useStore(selectProjectsAcrossEnvironments);
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
   const settings = useSettings();
   const [projectId, setProjectId] = useState<ProjectId | "">(projects[0]?.id ?? "");
   const selectedProject = projects.find((project) => project.id === projectId);
@@ -1830,6 +2135,39 @@ function JobRow({
   );
 }
 
+const planFieldHints: Readonly<
+  Record<keyof TrelloImplementationPlan, { readonly label: string; readonly hint: string }>
+> = {
+  overview: {
+    label: "Overview",
+    hint: "Summarize what this ticket is about and the intended outcome.",
+  },
+  implementationNotes: {
+    label: "Implementation notes",
+    hint: "Technical approach, files to touch, patterns to follow, or constraints.",
+  },
+  questions: {
+    label: "Questions",
+    hint: "Open questions the agent should resolve or flag before proceeding.",
+  },
+  risks: {
+    label: "Risks",
+    hint: "Edge cases, regressions, or areas that need extra care.",
+  },
+  acceptanceCriteria: {
+    label: "Acceptance criteria",
+    hint: "What must be true for this ticket to be considered done.",
+  },
+  testInstructions: {
+    label: "Test instructions",
+    hint: "How to verify the change — commands, flows, or scenarios to run.",
+  },
+  environmentNotes: {
+    label: "Environment notes",
+    hint: "Ports, env vars, seed data, or setup the agent should know about.",
+  },
+};
+
 function PlanEditor({
   plan,
   onChange,
@@ -1837,23 +2175,19 @@ function PlanEditor({
   readonly plan: TrelloImplementationPlan;
   readonly onChange: (plan: TrelloImplementationPlan) => void;
 }) {
-  const fields: ReadonlyArray<[keyof TrelloImplementationPlan, string]> = [
-    ["overview", "Overview"],
-    ["implementationNotes", "Implementation notes"],
-    ["questions", "Questions"],
-    ["risks", "Risks"],
-    ["acceptanceCriteria", "Acceptance criteria"],
-    ["testInstructions", "Test instructions"],
-    ["environmentNotes", "Environment notes"],
-  ];
+  const fields = Object.entries(planFieldHints) as ReadonlyArray<
+    [keyof TrelloImplementationPlan, (typeof planFieldHints)[keyof TrelloImplementationPlan]]
+  >;
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {fields.map(([key, label]) => (
+    <div className="grid gap-4 md:grid-cols-2">
+      {fields.map(([key, { label, hint }]) => (
         <label key={key} className="space-y-1.5">
-          <span className="text-xs font-medium text-muted-foreground">{label}</span>
+          <span className="text-xs font-medium text-foreground">{label}</span>
+          <span className="block text-[11px] text-muted-foreground">{hint}</span>
           <Textarea
             value={plan[key]}
             onChange={(event) => onChange({ ...plan, [key]: event.target.value })}
+            className="min-h-24"
           />
         </label>
       ))}
