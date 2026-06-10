@@ -4,12 +4,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2Icon,
+  ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClipboardListIcon,
@@ -43,11 +45,17 @@ import type {
 } from "@t3tools/contracts";
 
 import {
+  buildTrelloImageIndexByUrl,
+  collectTrelloCardImages,
+  resolveTrelloImageLightboxIndex,
+} from "@t3tools/shared/trelloCardImages";
+import {
   resolveTrelloMediaPreviewUrl,
   resolveTrelloMemberAvatarPreviewUrl,
 } from "@t3tools/shared/trelloMediaUrl";
 
-import ChatMarkdown from "../ChatMarkdown";
+import { cn } from "~/lib/utils";
+
 import { ensureLocalApi } from "../../localApi";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useSettings } from "../../hooks/useSettings";
@@ -56,6 +64,7 @@ import { Input } from "../ui/input";
 import { SidebarInset, SidebarTrigger } from "../ui/sidebar";
 import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
+import TrelloMarkdown from "./TrelloMarkdown";
 
 type TrelloSection = "board" | "stack" | "queue" | "runs" | "settings";
 type BoardFeatureFilter = "all" | "comments" | "attachments" | "checklists" | "description";
@@ -535,8 +544,8 @@ function SettingsPanel({
           <div className="flex flex-wrap items-end gap-2">
             <label className="min-w-64 flex-1 space-y-1.5">
               <span className="text-xs font-medium text-muted-foreground">Choose board</span>
-              <select
-                className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+              <NativeSelect
+                className="h-9"
                 value={boards.some((board) => board.id === boardRef) ? boardRef : ""}
                 onChange={(event) => {
                   const selected = boards.find((board) => board.id === event.target.value);
@@ -552,7 +561,7 @@ function SettingsPanel({
                     {board.name}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
             <Button size="sm" variant="outline" onClick={loadBoards} disabled={busy !== null}>
               {busy === "boards" ? (
@@ -811,17 +820,40 @@ function CardDetail({
 }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
-  const imageAttachments = card.attachments.filter(isImageAttachment);
+  const imageAttachments = useMemo(
+    () => card.attachments.filter(isImageAttachment),
+    [card.attachments],
+  );
   const fileAttachments = card.attachments.filter((attachment) => !isImageAttachment(attachment));
   const checklistsWithItems = card.checklists.filter((checklist) => checklist.items.length > 0);
   const hasDescription = card.desc.trim().length > 0;
+  const cardImages = useMemo(
+    () =>
+      collectTrelloCardImages({
+        imageAttachments,
+        desc: card.desc,
+        commentTexts: card.comments.map((comment) => comment.text),
+      }),
+    [card.comments, card.desc, imageAttachments],
+  );
+  const imageIndexByUrl = useMemo(() => buildTrelloImageIndexByUrl(cardImages), [cardImages]);
+  const openLightbox = useCallback((index: number) => {
+    setLightboxIndex(index);
+  }, []);
+  const openLightboxForUrl = useCallback(
+    (url: string) => {
+      const index = resolveTrelloImageLightboxIndex(imageIndexByUrl, url);
+      if (index !== null) setLightboxIndex(index);
+    },
+    [imageIndexByUrl],
+  );
 
   return (
     <>
       <div className="fixed inset-y-0 right-0 z-40 flex w-full max-w-2xl flex-col border-l border-border bg-background shadow-xl">
-        <div className="flex items-center gap-2 border-b border-border p-4">
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold">{card.name}</h2>
+        <div className="flex items-start gap-2 border-b border-border p-4">
+          <div className="min-w-0 flex-1">
+            <h2 className="break-words text-sm font-semibold">{card.name}</h2>
             <p className="text-xs text-muted-foreground">{listName}</p>
           </div>
           <Button size="sm" className="ml-auto" onClick={onAdd}>
@@ -861,7 +893,11 @@ function CardDetail({
               <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
                 Description
               </h3>
-              <ChatMarkdown text={card.desc} cwd={undefined} isStreaming={false} />
+              <TrelloMarkdown
+                text={card.desc}
+                imageIndexByUrl={imageIndexByUrl}
+                onImageClick={openLightbox}
+              />
             </section>
           ) : null}
           {card.comments.length > 0 ? (
@@ -873,7 +909,11 @@ function CardDetail({
                     {new Date(comment.date).toLocaleString()}
                   </div>
                   <div className="mt-1">
-                    <ChatMarkdown text={comment.text} cwd={undefined} isStreaming={false} />
+                    <TrelloMarkdown
+                      text={comment.text}
+                      imageIndexByUrl={imageIndexByUrl}
+                      onImageClick={openLightbox}
+                    />
                   </div>
                 </div>
               ))}
@@ -901,12 +941,12 @@ function CardDetail({
           {imageAttachments.length > 0 ? (
             <DetailBlock title="Images">
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {imageAttachments.map((attachment, index) => (
+                {imageAttachments.map((attachment) => (
                   <button
                     key={attachment.id}
                     type="button"
                     className="group overflow-hidden rounded-md border border-border/60 bg-muted/20 text-left transition-colors hover:border-border hover:bg-muted/40"
-                    onClick={() => setLightboxIndex(index)}
+                    onClick={() => openLightboxForUrl(attachment.url)}
                   >
                     <TrelloImagePreview
                       src={attachment.url}
@@ -933,8 +973,8 @@ function CardDetail({
         </div>
       </div>
       {lightboxIndex !== null ? (
-        <AttachmentImageLightbox
-          attachments={imageAttachments}
+        <CardImageLightbox
+          images={cardImages}
           index={lightboxIndex}
           onClose={() => setLightboxIndex(null)}
           onIndexChange={setLightboxIndex}
@@ -952,19 +992,19 @@ function clampLightboxZoom(value: number) {
   return Math.min(LIGHTBOX_MAX_ZOOM, Math.max(LIGHTBOX_MIN_ZOOM, value));
 }
 
-function AttachmentImageLightbox({
-  attachments,
+function CardImageLightbox({
+  images,
   index,
   onClose,
   onIndexChange,
 }: {
-  readonly attachments: readonly TrelloCard["attachments"][number][];
+  readonly images: readonly { readonly url: string; readonly name: string }[];
   readonly index: number;
   readonly onClose: () => void;
   readonly onIndexChange: (index: number) => void;
 }) {
-  const attachment = attachments[index];
-  const hasMultiple = attachments.length > 1;
+  const image = images[index];
+  const hasMultiple = images.length > 1;
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
@@ -985,12 +1025,12 @@ function AttachmentImageLightbox({
   }, []);
 
   const goToPrevious = useCallback(() => {
-    onIndexChange((index - 1 + attachments.length) % attachments.length);
-  }, [attachments.length, index, onIndexChange]);
+    onIndexChange((index - 1 + images.length) % images.length);
+  }, [images.length, index, onIndexChange]);
 
   const goToNext = useCallback(() => {
-    onIndexChange((index + 1) % attachments.length);
-  }, [attachments.length, index, onIndexChange]);
+    onIndexChange((index + 1) % images.length);
+  }, [images.length, index, onIndexChange]);
 
   const adjustZoom = useCallback((delta: number) => {
     setZoom((current) => {
@@ -1097,7 +1137,7 @@ function AttachmentImageLightbox({
     }
   }, []);
 
-  if (!attachment) return null;
+  if (!image) return null;
 
   const isZoomed = zoom > LIGHTBOX_MIN_ZOOM || pan.x !== 0 || pan.y !== 0;
 
@@ -1167,8 +1207,8 @@ function AttachmentImageLightbox({
               }}
             >
               <TrelloImagePreview
-                src={attachment.url}
-                alt={attachment.name}
+                src={image.url}
+                alt={image.name}
                 className="max-h-[calc(100vh-10rem)] max-w-full select-none rounded-lg object-contain shadow-2xl"
                 draggable={false}
               />
@@ -1212,8 +1252,8 @@ function AttachmentImageLightbox({
             </Button>
           </div>
           <p className="mt-2 max-w-full truncate px-2 text-center text-xs text-white/80">
-            {attachment.name}
-            {hasMultiple ? ` (${index + 1}/${attachments.length})` : ""}
+            {image.name}
+            {hasMultiple ? ` (${index + 1}/${images.length})` : ""}
           </p>
         </div>
         {hasMultiple ? (
@@ -1229,6 +1269,35 @@ function AttachmentImageLightbox({
           </Button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function NativeSelect({ className, ...props }: ComponentProps<"select">) {
+  return (
+    <div className="relative">
+      <select
+        className={cn(
+          "h-8 w-full appearance-none rounded-md border border-input bg-background pl-2 pr-8 text-sm",
+          className,
+        )}
+        {...props}
+      />
+      <ChevronDownIcon className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground opacity-80" />
+    </div>
+  );
+}
+
+function FilterFieldFooter({ children }: { readonly children: ReactNode }) {
+  return (
+    <div className="space-y-1">
+      <span
+        className="block text-[11px] font-medium uppercase text-muted-foreground invisible select-none"
+        aria-hidden="true"
+      >
+        &nbsp;
+      </span>
+      <div className="flex h-8 items-center">{children}</div>
     </div>
   );
 }
@@ -1266,7 +1335,7 @@ function BoardFilters({
 }) {
   return (
     <div className="mt-3 flex flex-wrap items-end gap-2">
-      <label className="min-w-56 flex-1 space-y-1">
+      <label className="w-full max-w-xs space-y-1">
         <span className="block text-[11px] font-medium uppercase text-muted-foreground">
           Search
         </span>
@@ -1282,40 +1351,31 @@ function BoardFilters({
       </label>
       <label className="min-w-40 space-y-1">
         <span className="block text-[11px] font-medium uppercase text-muted-foreground">Label</span>
-        <select
-          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-          value={labelId}
-          onChange={(event) => onLabelChange(event.target.value)}
-        >
+        <NativeSelect value={labelId} onChange={(event) => onLabelChange(event.target.value)}>
           <option value="">Any label</option>
           {labels.map((label) => (
             <option key={label.id} value={label.id}>
               {label.name || label.color || "Unnamed label"}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="min-w-44 space-y-1">
         <span className="block text-[11px] font-medium uppercase text-muted-foreground">
           Member
         </span>
-        <select
-          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
-          value={memberId}
-          onChange={(event) => onMemberChange(event.target.value)}
-        >
+        <NativeSelect value={memberId} onChange={(event) => onMemberChange(event.target.value)}>
           <option value="">Any member</option>
           {members.map((member) => (
             <option key={member.id} value={member.id}>
               {member.fullName || member.username}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </label>
       <label className="min-w-40 space-y-1">
         <span className="block text-[11px] font-medium uppercase text-muted-foreground">Cards</span>
-        <select
-          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+        <NativeSelect
           value={feature}
           onChange={(event) => onFeatureChange(event.target.value as BoardFeatureFilter)}
         >
@@ -1324,17 +1384,21 @@ function BoardFilters({
           <option value="attachments">With attachments</option>
           <option value="checklists">With checklists</option>
           <option value="description">With description</option>
-        </select>
+        </NativeSelect>
       </label>
-      <div className="flex items-center gap-2 pb-0.5 text-xs text-muted-foreground">
-        <FilterIcon className="size-3.5" />
-        {filteredCount}/{totalCount}
-      </div>
+      <FilterFieldFooter>
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <FilterIcon className="size-3.5" />
+          {filteredCount}/{totalCount}
+        </div>
+      </FilterFieldFooter>
       {hasActiveFilters ? (
-        <Button size="xs" variant="ghost" onClick={onReset}>
-          <XIcon className="size-3.5" />
-          Clear
-        </Button>
+        <FilterFieldFooter>
+          <Button size="xs" variant="ghost" onClick={onReset}>
+            <XIcon className="size-3.5" />
+            Clear
+          </Button>
+        </FilterFieldFooter>
       ) : null}
     </div>
   );
@@ -1521,8 +1585,8 @@ function QueuePanel({
       <section className="flex flex-wrap items-end gap-3">
         <label className="space-y-1">
           <span className="block text-xs font-medium text-muted-foreground">Parallelism</span>
-          <select
-            className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+          <NativeSelect
+            className="w-auto min-w-16"
             value={parallelism}
             onChange={(event) => setParallelism(event.target.value)}
           >
@@ -1531,12 +1595,11 @@ function QueuePanel({
                 {value}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <label className="min-w-72 space-y-1">
           <span className="block text-xs font-medium text-muted-foreground">Project</span>
-          <select
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+          <NativeSelect
             value={projectId}
             onChange={(event) => setProjectId(event.target.value as ProjectId)}
           >
@@ -1545,7 +1608,7 @@ function QueuePanel({
                 {project.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </label>
         <Button size="sm" onClick={start}>
           <PlayIcon className="size-4" />

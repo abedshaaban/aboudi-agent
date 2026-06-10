@@ -151,6 +151,10 @@
       "types": "./src/trelloMediaUrl.ts",
       "import": "./src/trelloMediaUrl.ts"
     },
+    "./trelloCardImages": {
+      "types": "./src/trelloCardImages.ts",
+      "import": "./src/trelloCardImages.ts"
+    },
     "./relayClient": {
       "types": "./src/relayClient.ts",
       "import": "./src/relayClient.ts"

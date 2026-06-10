@@ -16,7 +16,13 @@ export type TrelloCardAttachmentRef = {
   readonly attachmentId: string;
   readonly kind: "download" | "preview";
   readonly fileName: string;
+  readonly previewId?: string;
 };
+
+const TRELLO_CARD_ATTACHMENT_PREVIEWS_PATH_REGEX =
+  /^\/1\/cards\/([a-f0-9]{24})\/attachments\/([a-f0-9]{24})\/previews\/([a-f0-9]{24})\/download\/(.+)$/i;
+const TRELLO_CARD_ATTACHMENT_PATH_REGEX =
+  /^\/1\/cards\/([a-f0-9]{24})\/attachments\/([a-f0-9]{24})\/(download|preview)\/(.+)$/i;
 
 function encodeBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
@@ -69,9 +75,21 @@ export function parseTrelloCardAttachmentUrl(sourceUrl: string): TrelloCardAttac
     const url = new URL(sourceUrl);
     const host = url.hostname.toLowerCase();
     if (host !== "trello.com" && host !== "api.trello.com") return null;
-    const match = url.pathname.match(
-      /^\/1\/cards\/([a-f0-9]{24})\/attachments\/([a-f0-9]{24})\/(download|preview)\/(.+)$/i,
-    );
+
+    const previewsMatch = url.pathname.match(TRELLO_CARD_ATTACHMENT_PREVIEWS_PATH_REGEX);
+    if (previewsMatch) {
+      const fileName = decodeURIComponent(previewsMatch[4] ?? "");
+      if (!fileName) return null;
+      return {
+        cardId: previewsMatch[1] ?? "",
+        attachmentId: previewsMatch[2] ?? "",
+        previewId: previewsMatch[3] ?? "",
+        kind: "download",
+        fileName,
+      };
+    }
+
+    const match = url.pathname.match(TRELLO_CARD_ATTACHMENT_PATH_REGEX);
     if (!match) return null;
     const kind = match[3]?.toLowerCase() === "preview" ? "preview" : "download";
     const fileName = decodeURIComponent(match[4] ?? "");
@@ -92,12 +110,46 @@ export function buildTrelloAttachmentFetchTarget(
   apiKey: string,
   token: string,
 ): TrelloMediaFetchTarget {
+  const authHeaders = {
+    Authorization: buildTrelloOAuthAuthorizationHeader(apiKey, token),
+  };
+  if (attachment.previewId) {
+    return {
+      url: `https://api.trello.com/1/cards/${attachment.cardId}/attachments/${attachment.attachmentId}/previews/${attachment.previewId}/download/${encodeURIComponent(attachment.fileName)}`,
+      headers: authHeaders,
+    };
+  }
+
   return {
     url: `https://api.trello.com/1/cards/${attachment.cardId}/attachments/${attachment.attachmentId}/${attachment.kind}/${encodeURIComponent(attachment.fileName)}`,
-    headers: {
-      Authorization: buildTrelloOAuthAuthorizationHeader(apiKey, token),
-    },
+    headers: authHeaders,
   };
+}
+
+function buildTrelloAttachmentFetchTargets(
+  attachment: TrelloCardAttachmentRef,
+  apiKey: string,
+  token: string,
+): readonly TrelloMediaFetchTarget[] {
+  const targets = [buildTrelloAttachmentFetchTarget(attachment, apiKey, token)];
+  if (!attachment.previewId) return targets;
+
+  const authHeaders = {
+    Authorization: buildTrelloOAuthAuthorizationHeader(apiKey, token),
+  };
+  const { cardId, attachmentId, fileName } = attachment;
+  const encodedFileName = encodeURIComponent(fileName);
+  targets.push(
+    {
+      url: `https://api.trello.com/1/cards/${cardId}/attachments/${attachmentId}/download/${encodedFileName}`,
+      headers: authHeaders,
+    },
+    {
+      url: `https://api.trello.com/1/cards/${cardId}/attachments/${attachmentId}/preview/${encodedFileName}`,
+      headers: authHeaders,
+    },
+  );
+  return targets;
 }
 
 export function buildTrelloMediaUrl(sourceUrl: string): string {
@@ -196,7 +248,7 @@ export function buildTrelloAssetFetchTargets(
 ): readonly TrelloMediaFetchTarget[] {
   const attachment = parseTrelloCardAttachmentUrl(sourceUrl);
   if (attachment) {
-    return [buildTrelloAttachmentFetchTarget(attachment, apiKey, token)];
+    return buildTrelloAttachmentFetchTargets(attachment, apiKey, token);
   }
 
   const memberAvatar = parseTrelloMembersAvatarUrl(sourceUrl);

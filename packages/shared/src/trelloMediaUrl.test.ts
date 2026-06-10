@@ -102,6 +102,40 @@ describe("trelloMediaUrl", () => {
     ]);
   });
 
+  it("uses OAuth headers for nested attachment preview downloads", () => {
+    const cardId = "6a04369a7d2289d6d8333e54";
+    const attachmentId = "6a0436de08bfd2c2b3e6cb15";
+    const previewId = "6a0436df08bfd2c2b3e6cc5a";
+    const source = `https://trello.com/1/cards/${cardId}/attachments/${attachmentId}/previews/${previewId}/download/image.webp`;
+    expect(parseTrelloCardAttachmentUrl(source)).toEqual({
+      cardId,
+      attachmentId,
+      previewId,
+      kind: "download",
+      fileName: "image.webp",
+    });
+    expect(buildTrelloAssetFetchTargets(source, "api-key", "token")).toEqual([
+      {
+        url: `https://api.trello.com/1/cards/${cardId}/attachments/${attachmentId}/previews/${previewId}/download/image.webp`,
+        headers: {
+          Authorization: 'OAuth oauth_consumer_key="api-key", oauth_token="token"',
+        },
+      },
+      {
+        url: `https://api.trello.com/1/cards/${cardId}/attachments/${attachmentId}/download/image.webp`,
+        headers: {
+          Authorization: 'OAuth oauth_consumer_key="api-key", oauth_token="token"',
+        },
+      },
+      {
+        url: `https://api.trello.com/1/cards/${cardId}/attachments/${attachmentId}/preview/image.webp`,
+        headers: {
+          Authorization: 'OAuth oauth_consumer_key="api-key", oauth_token="token"',
+        },
+      },
+    ]);
+  });
+
   it("appends Trello auth params without dropping existing query params", () => {
     const authenticated = appendTrelloAuthParams(
       "https://trello.com/1/cards/abc/attachments/def/download/photo.png?foo=bar",
