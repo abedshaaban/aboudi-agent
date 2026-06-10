@@ -41,6 +41,7 @@ import {
 } from "./methods/updates.ts";
 import {
   trelloAddToStack,
+  trelloRemoveFromStack,
   trelloCleanupJob,
   trelloGetSnapshot,
   trelloListBoards,
@@ -109,6 +110,7 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(trelloTestConnection);
   yield* ipc.handle(trelloSyncBoard);
   yield* ipc.handle(trelloAddToStack);
+  yield* ipc.handle(trelloRemoveFromStack);
   yield* ipc.handle(trelloUpdateStackItem);
   yield* ipc.handle(trelloMoveToQueue);
   yield* ipc.handle(trelloStartQueue);

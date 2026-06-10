@@ -490,6 +490,7 @@ const createDesktopBridgeStub = (overrides?: {
       listCount: 0,
     }),
     trelloAddToStack: vi.fn().mockRejectedValue(new Error("trelloAddToStack not implemented")),
+    trelloRemoveFromStack: vi.fn().mockResolvedValue(undefined),
     trelloUpdateStackItem: vi
       .fn()
       .mockRejectedValue(new Error("trelloUpdateStackItem not implemented")),

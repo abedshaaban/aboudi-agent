@@ -226,6 +226,11 @@ export const TrelloAddToStackInput = Schema.Struct({
 });
 export type TrelloAddToStackInput = typeof TrelloAddToStackInput.Type;
 
+export const TrelloRemoveFromStackInput = Schema.Struct({
+  cardId: TrelloId,
+});
+export type TrelloRemoveFromStackInput = typeof TrelloRemoveFromStackInput.Type;
+
 export const TrelloUpdateStackItemInput = Schema.Struct({
   jobId: TrelloWorkflowJobId,
   plan: TrelloImplementationPlan,

@@ -1,5 +1,6 @@
 import {
   TrelloAddToStackInput,
+  TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloJobIdInput,
   TrelloMoveToQueueInput,
@@ -78,6 +79,16 @@ export const trelloAddToStack = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.trello.addToStack")(function* (input) {
     const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
     return yield* trello.addToStack(input);
+  }),
+});
+
+export const trelloRemoveFromStack = makeIpcMethod({
+  channel: IpcChannels.TRELLO_REMOVE_FROM_STACK_CHANNEL,
+  payload: TrelloRemoveFromStackInput,
+  result: Schema.Void,
+  handler: Effect.fn("desktop.ipc.trello.removeFromStack")(function* (input) {
+    const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
+    yield* trello.removeFromStack(input);
   }),
 });
 

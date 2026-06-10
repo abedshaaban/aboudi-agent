@@ -109,6 +109,8 @@ contextBridge.exposeInMainWorld("desktopBridge", {
   trelloTestConnection: () => ipcRenderer.invoke(IpcChannels.TRELLO_TEST_CONNECTION_CHANNEL),
   trelloSyncBoard: () => ipcRenderer.invoke(IpcChannels.TRELLO_SYNC_BOARD_CHANNEL),
   trelloAddToStack: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_ADD_TO_STACK_CHANNEL, input),
+  trelloRemoveFromStack: (input) =>
+    ipcRenderer.invoke(IpcChannels.TRELLO_REMOVE_FROM_STACK_CHANNEL, input),
   trelloUpdateStackItem: (input) =>
     ipcRenderer.invoke(IpcChannels.TRELLO_UPDATE_STACK_ITEM_CHANNEL, input),
   trelloMoveToQueue: (input) => ipcRenderer.invoke(IpcChannels.TRELLO_MOVE_TO_QUEUE_CHANNEL, input),

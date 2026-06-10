@@ -143,6 +143,10 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         window.desktopBridge
           ? window.desktopBridge.trelloAddToStack(input)
           : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      removeFromStack: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloRemoveFromStack(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
       updateStackItem: (input) =>
         window.desktopBridge
           ? window.desktopBridge.trelloUpdateStackItem(input)

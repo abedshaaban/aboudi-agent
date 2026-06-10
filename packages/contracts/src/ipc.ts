@@ -82,6 +82,7 @@ import type {
 } from "./sourceControl.ts";
 import type {
   TrelloAddToStackInput,
+  TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloJobIdInput,
   TrelloMoveToQueueInput,
@@ -466,6 +467,7 @@ export interface DesktopBridge {
   trelloTestConnection: () => Promise<TrelloTestConnectionResult>;
   trelloSyncBoard: () => Promise<TrelloSyncResult>;
   trelloAddToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
+  trelloRemoveFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
   trelloUpdateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
   trelloMoveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
   trelloStartQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;
@@ -527,6 +529,7 @@ export interface LocalApi {
     testConnection: () => Promise<TrelloTestConnectionResult>;
     syncBoard: () => Promise<TrelloSyncResult>;
     addToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
+    removeFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
     updateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
     moveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
     startQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;

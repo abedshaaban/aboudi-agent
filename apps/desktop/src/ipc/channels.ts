@@ -14,6 +14,7 @@ export const TRELLO_LIST_BOARDS_CHANNEL = "desktop:trello-list-boards";
 export const TRELLO_TEST_CONNECTION_CHANNEL = "desktop:trello-test-connection";
 export const TRELLO_SYNC_BOARD_CHANNEL = "desktop:trello-sync-board";
 export const TRELLO_ADD_TO_STACK_CHANNEL = "desktop:trello-add-to-stack";
+export const TRELLO_REMOVE_FROM_STACK_CHANNEL = "desktop:trello-remove-from-stack";
 export const TRELLO_UPDATE_STACK_ITEM_CHANNEL = "desktop:trello-update-stack-item";
 export const TRELLO_MOVE_TO_QUEUE_CHANNEL = "desktop:trello-move-to-queue";
 export const TRELLO_START_QUEUE_CHANNEL = "desktop:trello-start-queue";

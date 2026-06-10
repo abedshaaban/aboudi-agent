@@ -719,6 +719,20 @@ function BoardPanel({
     }
   };
 
+  const removeFromStack = async (cardId: string) => {
+    try {
+      await getClient().removeFromStack({ cardId: cardId as TrelloCard["id"] });
+      toastManager.add({ type: "success", title: "Removed from Stack" });
+      await reload();
+    } catch (cause) {
+      notifyError("Failed to remove card from Stack", cause);
+    }
+  };
+
+  const selectedCardInStack = selectedCard
+    ? snapshot.stackItems.some((item) => item.cardId === selectedCard.id)
+    : false;
+
   const goToSettings = () => {
     void navigate({ to: "/trello-settings" });
   };
@@ -863,8 +877,10 @@ function BoardPanel({
             snapshot.cache.lists.find((list) => list.id === selectedCard.idList)?.name ?? ""
           }
           members={snapshot.cache.members}
+          isInStack={selectedCardInStack}
           onClose={() => setSelectedCard(null)}
           onAdd={() => addToStack(selectedCard.id)}
+          onRemove={() => removeFromStack(selectedCard.id)}
         />
       ) : null}
     </div>
@@ -875,14 +891,18 @@ function CardDetail({
   card,
   listName,
   members,
+  isInStack,
   onClose,
   onAdd,
+  onRemove,
 }: {
   readonly card: TrelloCard;
   readonly listName: string;
   readonly members: TrelloWorkflowSnapshot["cache"]["members"];
+  readonly isInStack: boolean;
   readonly onClose: () => void;
   readonly onAdd: () => void;
+  readonly onRemove: () => void;
 }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
@@ -922,8 +942,13 @@ function CardDetail({
             <h2 className="break-words text-sm font-semibold">{card.name}</h2>
             <p className="text-xs text-muted-foreground">{listName}</p>
           </div>
-          <Button size="sm" className="ml-auto" onClick={onAdd}>
-            Add to Stack
+          <Button
+            size="sm"
+            className="ml-auto"
+            variant={isInStack ? "outline" : "default"}
+            onClick={isInStack ? onRemove : onAdd}
+          >
+            {isInStack ? "Remove from Stack" : "Add to Stack"}
           </Button>
           <Button size="sm" variant="ghost" onClick={onClose}>
             Close

@@ -1,6 +1,7 @@
 // @ts-nocheck
 import type {
   TrelloAddToStackInput,
+  TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloBoardCache,
   TrelloJobIdInput,
@@ -73,6 +74,7 @@ export interface DesktopTrelloWorkflowShape {
   readonly testConnection: () => Effect.Effect<TrelloTestConnectionResult>;
   readonly syncBoard: () => Effect.Effect<TrelloSyncResult>;
   readonly addToStack: (input: TrelloAddToStackInput) => Effect.Effect<TrelloStackItem>;
+  readonly removeFromStack: (input: TrelloRemoveFromStackInput) => Effect.Effect<void>;
   readonly updateStackItem: (input: TrelloUpdateStackItemInput) => Effect.Effect<TrelloStackItem>;
   readonly moveToQueue: (input: TrelloMoveToQueueInput) => Effect.Effect<TrelloQueueJob>;
   readonly startQueue: (input: TrelloStartQueueInput) => Effect.Effect<TrelloQueueStatus>;
@@ -683,6 +685,12 @@ export const layer = Layer.effect(
           };
           document.stackItems.unshift(item);
           return item;
+        }),
+      removeFromStack: (input) =>
+        persist(async (document) => {
+          const index = document.stackItems.findIndex((item) => item.cardId === input.cardId);
+          if (index === -1) throw new Error("Stack item not found.");
+          document.stackItems.splice(index, 1);
         }),
       updateStackItem: (input) =>
         persist(async (document) => {

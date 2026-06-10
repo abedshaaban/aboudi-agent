@@ -264,6 +264,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     trelloAddToStack: async () => {
       throw new Error("trelloAddToStack not implemented in test");
     },
+    trelloRemoveFromStack: async () => undefined,
     trelloUpdateStackItem: async () => {
       throw new Error("trelloUpdateStackItem not implemented in test");
     },
