@@ -538,7 +538,7 @@ export const layer = Layer.effect(
               document,
             ),
             trelloFetch(
-              `/boards/${encodeURIComponent(boardId)}/cards?fields=name,desc,url,closed,idList,idMembers,dateLastActivity&labels=true&attachments=true&checklists=all`,
+              `/boards/${encodeURIComponent(boardId)}/cards?fields=name,desc,url,closed,idList,idMembers,idLabels,dateLastActivity&labels=all&attachments=true&checklists=all`,
               document,
             ),
             trelloFetch(
@@ -564,6 +564,12 @@ export const layer = Layer.effect(
               }
             }),
           );
+          const normalizedLabels = labels.map((label) => ({
+            id: label.id,
+            name: label.name ?? "",
+            color: label.color ?? null,
+          }));
+          const labelById = new Map(normalizedLabels.map((label) => [label.id, label]));
           document.cache = {
             board: {
               id: board.id,
@@ -577,11 +583,7 @@ export const layer = Layer.effect(
               closed: Boolean(list.closed),
               pos: Number(list.pos ?? 0),
             })),
-            labels: labels.map((label) => ({
-              id: label.id,
-              name: label.name ?? "",
-              color: label.color ?? null,
-            })),
+            labels: normalizedLabels,
             members: members.map((member) => ({
               id: member.id,
               fullName: member.fullName ?? "",
@@ -595,11 +597,19 @@ export const layer = Layer.effect(
               desc: card.desc ?? "",
               url: card.url ?? "",
               closed: Boolean(card.closed),
-              labels: (card.labels ?? []).map((label) => ({
-                id: label.id,
-                name: label.name ?? "",
-                color: label.color ?? null,
-              })),
+              labels: [
+                ...(card.labels ?? []).map((label) => ({
+                  id: label.id,
+                  name: label.name ?? "",
+                  color: label.color ?? null,
+                })),
+                ...(card.idLabels ?? [])
+                  .map((id) => labelById.get(id))
+                  .filter((label) => label !== undefined),
+              ].filter(
+                (label, index, allLabels) =>
+                  allLabels.findIndex((candidate) => candidate.id === label.id) === index,
+              ),
               idMembers: card.idMembers ?? [],
               comments: (commentsByCardId.get(card.id) ?? [])
                 .filter((action) => action.type === "commentCard" && action.data?.text)

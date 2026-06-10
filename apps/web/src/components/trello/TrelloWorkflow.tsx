@@ -3,21 +3,27 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2Icon,
   ClipboardListIcon,
+  FilterIcon,
   Loader2Icon,
   MessageSquareIcon,
   PaperclipIcon,
   PlayIcon,
   RefreshCwIcon,
   RotateCcwIcon,
+  SearchIcon,
   SettingsIcon,
   SquareIcon,
+  TagsIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react";
 import type {
   ProjectId,
   TrelloBoardSummary,
   TrelloCard,
   TrelloImplementationPlan,
+  TrelloLabel,
+  TrelloMember,
   TrelloQueueJob,
   TrelloWorkflowJobId,
   TrelloWorkflowSnapshot,
@@ -33,6 +39,7 @@ import { Textarea } from "../ui/textarea";
 import { toastManager } from "../ui/toast";
 
 type TrelloSection = "board" | "stack" | "queue" | "runs" | "settings";
+type BoardFeatureFilter = "all" | "comments" | "attachments" | "checklists" | "description";
 
 interface TrelloWorkflowProps {
   readonly section: TrelloSection;
@@ -88,6 +95,37 @@ function checklistProgress(card: TrelloCard) {
   const items = card.checklists.flatMap((checklist) => checklist.items);
   const complete = items.filter((item) => item.state === "complete").length;
   return { complete, total: items.length };
+}
+
+function labelTone(label: TrelloLabel) {
+  const color = label.color ?? "";
+  if (color === "green") return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
+  if (color === "yellow") return "bg-yellow-500/20 text-yellow-800 dark:text-yellow-300";
+  if (color === "orange") return "bg-orange-500/15 text-orange-700 dark:text-orange-300";
+  if (color === "red") return "bg-red-500/15 text-red-700 dark:text-red-300";
+  if (color === "purple") return "bg-violet-500/15 text-violet-700 dark:text-violet-300";
+  if (color === "blue") return "bg-blue-500/15 text-blue-700 dark:text-blue-300";
+  if (color === "sky") return "bg-sky-500/15 text-sky-700 dark:text-sky-300";
+  if (color === "lime") return "bg-lime-500/15 text-lime-700 dark:text-lime-300";
+  if (color === "pink") return "bg-pink-500/15 text-pink-700 dark:text-pink-300";
+  if (color === "black") return "bg-zinc-700 text-zinc-50";
+  return "bg-muted text-muted-foreground";
+}
+
+function memberInitials(member: TrelloMember) {
+  const source = member.fullName || member.username;
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+  return source.slice(0, 2).toUpperCase() || "?";
+}
+
+function cardMatchesFeature(card: TrelloCard, feature: BoardFeatureFilter) {
+  if (feature === "comments") return card.comments.length > 0;
+  if (feature === "attachments") return card.attachments.length > 0;
+  if (feature === "checklists")
+    return card.checklists.some((checklist) => checklist.items.length > 0);
+  if (feature === "description") return card.desc.trim().length > 0;
+  return true;
 }
 
 function Header({
@@ -368,14 +406,46 @@ function BoardPanel({
   const [selectedCard, setSelectedCard] = useState<TrelloCard | null>(null);
   const [credentialIssue, setCredentialIssue] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [query, setQuery] = useState("");
+  const [labelId, setLabelId] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const [feature, setFeature] = useState<BoardFeatureFilter>("all");
   const credentialsMissing = !snapshot.settings.hasApiKey || !snapshot.settings.hasToken;
+  const hasActiveFilters =
+    query.trim().length > 0 || labelId.length > 0 || memberId.length > 0 || feature !== "all";
+  const filteredCards = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return snapshot.cache.cards.filter((card) => {
+      if (card.closed) return false;
+      if (labelId && !card.labels.some((label) => label.id === labelId)) return false;
+      if (memberId && !card.idMembers.includes(memberId as TrelloMember["id"])) return false;
+      if (!cardMatchesFeature(card, feature)) return false;
+      if (!normalizedQuery) return true;
+      const haystack = [
+        card.name,
+        card.desc,
+        ...card.labels.map((label) => label.name || label.color || ""),
+        ...card.comments.map((comment) => comment.text),
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [feature, labelId, memberId, query, snapshot.cache.cards]);
   const cardsByList = useMemo(() => {
     const byList = new Map<string, TrelloCard[]>();
-    for (const card of snapshot.cache.cards.filter((card) => !card.closed)) {
+    for (const card of filteredCards) {
       byList.set(card.idList, [...(byList.get(card.idList) ?? []), card]);
     }
     return byList;
-  }, [snapshot.cache.cards]);
+  }, [filteredCards]);
+
+  const resetFilters = () => {
+    setQuery("");
+    setLabelId("");
+    setMemberId("");
+    setFeature("all");
+  };
 
   const addToStack = async (cardId: string) => {
     try {
@@ -465,6 +535,22 @@ function BoardPanel({
             onSettings={goToSettings}
           />
         ) : null}
+        <BoardFilters
+          query={query}
+          onQueryChange={setQuery}
+          labelId={labelId}
+          onLabelChange={setLabelId}
+          memberId={memberId}
+          onMemberChange={setMemberId}
+          feature={feature}
+          onFeatureChange={setFeature}
+          labels={snapshot.cache.labels}
+          members={snapshot.cache.members}
+          filteredCount={filteredCards.length}
+          totalCount={snapshot.cache.cards.filter((card) => !card.closed).length}
+          onReset={resetFilters}
+          hasActiveFilters={hasActiveFilters}
+        />
       </div>
       <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto p-3">
         {snapshot.cache.lists
@@ -474,51 +560,26 @@ function BoardPanel({
               key={list.id}
               className="flex w-72 shrink-0 flex-col rounded-lg border border-border/70 bg-muted/20"
             >
-              <div className="border-b border-border/60 px-3 py-2 text-xs font-semibold">
-                {list.name}
+              <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
+                <span className="min-w-0 flex-1 truncate text-xs font-semibold">{list.name}</span>
+                <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {(cardsByList.get(list.id) ?? []).length}
+                </span>
               </div>
               <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-                {(cardsByList.get(list.id) ?? []).map((card) => {
-                  const progress = checklistProgress(card);
-                  return (
-                    <button
-                      key={card.id}
-                      className="rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-accent"
-                      onClick={() => setSelectedCard(card)}
-                    >
-                      <div className="line-clamp-2 text-xs font-medium">{card.name}</div>
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {card.labels.slice(0, 4).map((label) => (
-                          <span
-                            key={label.id}
-                            className="rounded-sm bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
-                          >
-                            {label.name || label.color || "label"}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="mt-2 flex items-center gap-3 text-[10px] text-muted-foreground">
-                        {progress.total > 0 ? (
-                          <span>
-                            {progress.complete}/{progress.total}
-                          </span>
-                        ) : null}
-                        {card.comments.length > 0 ? (
-                          <span className="inline-flex items-center gap-1">
-                            <MessageSquareIcon className="size-3" />
-                            {card.comments.length}
-                          </span>
-                        ) : null}
-                        {card.attachments.length > 0 ? (
-                          <span className="inline-flex items-center gap-1">
-                            <PaperclipIcon className="size-3" />
-                            {card.attachments.length}
-                          </span>
-                        ) : null}
-                      </div>
-                    </button>
-                  );
-                })}
+                {(cardsByList.get(list.id) ?? []).map((card) => (
+                  <BoardCard
+                    key={card.id}
+                    card={card}
+                    members={snapshot.cache.members}
+                    onSelect={() => setSelectedCard(card)}
+                  />
+                ))}
+                {(cardsByList.get(list.id) ?? []).length === 0 ? (
+                  <div className="rounded-md border border-dashed border-border/70 p-3 text-center text-xs text-muted-foreground">
+                    No matching cards
+                  </div>
+                ) : null}
               </div>
             </section>
           ))}
@@ -629,6 +690,188 @@ function CardDetail({
         </DetailBlock>
       </div>
     </div>
+  );
+}
+
+function BoardFilters({
+  query,
+  onQueryChange,
+  labelId,
+  onLabelChange,
+  memberId,
+  onMemberChange,
+  feature,
+  onFeatureChange,
+  labels,
+  members,
+  filteredCount,
+  totalCount,
+  onReset,
+  hasActiveFilters,
+}: {
+  readonly query: string;
+  readonly onQueryChange: (value: string) => void;
+  readonly labelId: string;
+  readonly onLabelChange: (value: string) => void;
+  readonly memberId: string;
+  readonly onMemberChange: (value: string) => void;
+  readonly feature: BoardFeatureFilter;
+  readonly onFeatureChange: (value: BoardFeatureFilter) => void;
+  readonly labels: readonly TrelloLabel[];
+  readonly members: readonly TrelloMember[];
+  readonly filteredCount: number;
+  readonly totalCount: number;
+  readonly onReset: () => void;
+  readonly hasActiveFilters: boolean;
+}) {
+  return (
+    <div className="mt-3 flex flex-wrap items-end gap-2">
+      <label className="min-w-56 flex-1 space-y-1">
+        <span className="block text-[11px] font-medium uppercase text-muted-foreground">
+          Search
+        </span>
+        <div className="relative">
+          <SearchIcon className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => onQueryChange(event.target.value)}
+            className="h-8 pl-7 text-sm"
+            placeholder="Title, description, comment, label"
+          />
+        </div>
+      </label>
+      <label className="min-w-40 space-y-1">
+        <span className="block text-[11px] font-medium uppercase text-muted-foreground">Label</span>
+        <select
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+          value={labelId}
+          onChange={(event) => onLabelChange(event.target.value)}
+        >
+          <option value="">Any label</option>
+          {labels.map((label) => (
+            <option key={label.id} value={label.id}>
+              {label.name || label.color || "Unnamed label"}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="min-w-44 space-y-1">
+        <span className="block text-[11px] font-medium uppercase text-muted-foreground">
+          Member
+        </span>
+        <select
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+          value={memberId}
+          onChange={(event) => onMemberChange(event.target.value)}
+        >
+          <option value="">Any member</option>
+          {members.map((member) => (
+            <option key={member.id} value={member.id}>
+              {member.fullName || member.username}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="min-w-40 space-y-1">
+        <span className="block text-[11px] font-medium uppercase text-muted-foreground">Cards</span>
+        <select
+          className="h-8 w-full rounded-md border border-input bg-background px-2 text-sm"
+          value={feature}
+          onChange={(event) => onFeatureChange(event.target.value as BoardFeatureFilter)}
+        >
+          <option value="all">All cards</option>
+          <option value="comments">With comments</option>
+          <option value="attachments">With attachments</option>
+          <option value="checklists">With checklists</option>
+          <option value="description">With description</option>
+        </select>
+      </label>
+      <div className="flex items-center gap-2 pb-0.5 text-xs text-muted-foreground">
+        <FilterIcon className="size-3.5" />
+        {filteredCount}/{totalCount}
+      </div>
+      {hasActiveFilters ? (
+        <Button size="xs" variant="ghost" onClick={onReset}>
+          <XIcon className="size-3.5" />
+          Clear
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function BoardCard({
+  card,
+  members,
+  onSelect,
+}: {
+  readonly card: TrelloCard;
+  readonly members: readonly TrelloMember[];
+  readonly onSelect: () => void;
+}) {
+  const progress = checklistProgress(card);
+  const cardMembers = members.filter((member) => card.idMembers.includes(member.id));
+  return (
+    <button
+      className="rounded-md border border-border/70 bg-background p-2 text-left shadow-xs transition-colors hover:bg-accent"
+      onClick={onSelect}
+    >
+      {card.labels.length > 0 ? (
+        <div className="mb-2 flex flex-wrap gap-1">
+          {card.labels.slice(0, 5).map((label) => (
+            <span
+              key={label.id}
+              className={`inline-flex max-w-full items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${labelTone(label)}`}
+              title={label.name || label.color || "Label"}
+            >
+              <TagsIcon className="size-2.5 shrink-0" />
+              <span className="truncate">{label.name || label.color || "label"}</span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="line-clamp-2 text-xs font-medium">{card.name}</div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-3 text-[10px] text-muted-foreground">
+          {progress.total > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <CheckCircle2Icon className="size-3" />
+              {progress.complete}/{progress.total}
+            </span>
+          ) : null}
+          {card.comments.length > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <MessageSquareIcon className="size-3" />
+              {card.comments.length}
+            </span>
+          ) : null}
+          {card.attachments.length > 0 ? (
+            <span className="inline-flex items-center gap-1">
+              <PaperclipIcon className="size-3" />
+              {card.attachments.length}
+            </span>
+          ) : null}
+        </div>
+        {cardMembers.length > 0 ? (
+          <div className="flex shrink-0 -space-x-1" aria-label={`${cardMembers.length} members`}>
+            {cardMembers.slice(0, 4).map((member) => (
+              <span
+                key={member.id}
+                className="inline-flex size-6 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold text-foreground"
+                title={member.fullName || member.username}
+              >
+                {memberInitials(member)}
+              </span>
+            ))}
+            {cardMembers.length > 4 ? (
+              <span className="inline-flex size-6 items-center justify-center rounded-full border border-background bg-muted text-[10px] font-semibold text-muted-foreground">
+                +{cardMembers.length - 4}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </button>
   );
 }
 
