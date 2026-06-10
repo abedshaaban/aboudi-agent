@@ -6,8 +6,12 @@ import * as Scope from "effect/Scope";
 
 import {
   appendTrelloAuthParams,
+  buildTrelloAssetFetchTargets,
+  buildTrelloMembersAvatarFetchTargets,
   parseTrelloMediaRequestUrl,
   TRELLO_MEDIA_SCHEME,
+  type TrelloMediaFetchTarget,
+  type TrelloMediaRequest,
 } from "@t3tools/shared/trelloMediaUrl";
 import * as Electron from "electron";
 
@@ -49,6 +53,62 @@ const registerSchemePrivileges = Effect.sync(() => {
 
 export const layerSchemePrivileges = Layer.effectDiscard(registerSchemePrivileges);
 
+async function fetchFirstOk(targets: readonly TrelloMediaFetchTarget[]) {
+  let lastResponse: Response | null = null;
+  for (const target of targets) {
+    const response = await Electron.net.fetch(target.url, {
+      ...(target.headers ? { headers: target.headers } : {}),
+      redirect: "follow",
+    });
+    lastResponse = response;
+    if (response.ok) return response;
+  }
+  return lastResponse ?? new Response("Failed to fetch Trello media", { status: 502 });
+}
+
+async function resolveMediaFetchTargets(
+  mediaRequest: TrelloMediaRequest,
+  apiKey: string,
+  token: string,
+): Promise<readonly TrelloMediaFetchTarget[]> {
+  if (mediaRequest.kind === "member-avatar") {
+    const targets = [
+      ...buildTrelloMembersAvatarFetchTargets({ memberId: mediaRequest.memberId, apiKey, token }),
+    ];
+    try {
+      const memberResponse = await Electron.net.fetch(
+        appendTrelloAuthParams(
+          `https://api.trello.com/1/members/${mediaRequest.memberId}?fields=avatarHash,nonPublic`,
+          apiKey,
+          token,
+        ),
+      );
+      if (memberResponse.ok) {
+        const member = (await memberResponse.json()) as {
+          avatarHash?: string | null;
+          nonPublic?: { avatarHash?: string | null } | null;
+        };
+        const avatarHash = member.nonPublic?.avatarHash ?? member.avatarHash ?? null;
+        for (const target of buildTrelloMembersAvatarFetchTargets({
+          memberId: mediaRequest.memberId,
+          avatarHash,
+          apiKey,
+          token,
+        })) {
+          if (!targets.some((candidate) => candidate.url === target.url)) {
+            targets.push(target);
+          }
+        }
+      }
+    } catch {
+      // Fall back to the member avatar API route.
+    }
+    return targets;
+  }
+
+  return buildTrelloAssetFetchTargets(mediaRequest.sourceUrl, apiKey, token);
+}
+
 const make = Effect.gen(function* () {
   const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
   const runtimeContext = yield* Effect.context<never>();
@@ -58,8 +118,8 @@ const make = Effect.gen(function* () {
     Effect.try({
       try: () => {
         Electron.protocol.handle(TRELLO_MEDIA_SCHEME, async (request) => {
-          const sourceUrl = parseTrelloMediaRequestUrl(request.url);
-          if (!sourceUrl) {
+          const mediaRequest = parseTrelloMediaRequestUrl(request.url);
+          if (!mediaRequest) {
             return new Response("Invalid Trello media URL", { status: 400 });
           }
 
@@ -69,8 +129,8 @@ const make = Effect.gen(function* () {
               return new Response("Trello credentials are not configured", { status: 401 });
             }
 
-            const authenticatedUrl = appendTrelloAuthParams(sourceUrl, apiKey, token);
-            const response = await Electron.net.fetch(authenticatedUrl);
+            const fetchTargets = await resolveMediaFetchTargets(mediaRequest, apiKey, token);
+            const response = await fetchFirstOk(fetchTargets);
             const contentType = response.headers.get("content-type") ?? "application/octet-stream";
             return new Response(response.body, {
               status: response.status,

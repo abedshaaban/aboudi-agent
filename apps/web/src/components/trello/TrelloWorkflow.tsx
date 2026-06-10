@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   CheckCircle2Icon,
@@ -19,6 +27,8 @@ import {
   TagsIcon,
   Trash2Icon,
   XIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
 } from "lucide-react";
 import type {
   ProjectId,
@@ -32,8 +42,12 @@ import type {
   TrelloWorkflowSnapshot,
 } from "@t3tools/contracts";
 
-import { resolveTrelloMediaPreviewUrl } from "@t3tools/shared/trelloMediaUrl";
+import {
+  resolveTrelloMediaPreviewUrl,
+  resolveTrelloMemberAvatarPreviewUrl,
+} from "@t3tools/shared/trelloMediaUrl";
 
+import ChatMarkdown from "../ChatMarkdown";
 import { ensureLocalApi } from "../../localApi";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
 import { useSettings } from "../../hooks/useSettings";
@@ -244,7 +258,7 @@ function MemberAvatar({
   const [imageFailed, setImageFailed] = useState(false);
   const sizeClass = size === "sm" ? "size-6 text-[10px]" : "size-8 text-xs";
   const name = memberDisplayName(member);
-  const avatarSrc = resolveTrelloMediaPreviewUrl(member.avatarUrl);
+  const avatarSrc = resolveTrelloMemberAvatarPreviewUrl(member);
   if (avatarSrc && !imageFailed) {
     return (
       <img
@@ -842,7 +856,14 @@ function CardDetail({
               </div>
             </section>
           ) : null}
-          {hasDescription ? <DetailBlock title="Description">{card.desc}</DetailBlock> : null}
+          {hasDescription ? (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                Description
+              </h3>
+              <ChatMarkdown text={card.desc} cwd={undefined} isStreaming={false} />
+            </section>
+          ) : null}
           {card.comments.length > 0 ? (
             <DetailBlock title="Comments">
               {card.comments.map((comment) => (
@@ -851,9 +872,9 @@ function CardDetail({
                     {comment.memberCreatorName ?? "Trello"} ·{" "}
                     {new Date(comment.date).toLocaleString()}
                   </div>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-foreground/85">
-                    {comment.text}
-                  </p>
+                  <div className="mt-1">
+                    <ChatMarkdown text={comment.text} cwd={undefined} isStreaming={false} />
+                  </div>
                 </div>
               ))}
             </DetailBlock>
@@ -923,6 +944,14 @@ function CardDetail({
   );
 }
 
+const LIGHTBOX_MIN_ZOOM = 1;
+const LIGHTBOX_MAX_ZOOM = 4;
+const LIGHTBOX_ZOOM_STEP = 0.25;
+
+function clampLightboxZoom(value: number) {
+  return Math.min(LIGHTBOX_MAX_ZOOM, Math.max(LIGHTBOX_MIN_ZOOM, value));
+}
+
 function AttachmentImageLightbox({
   attachments,
   index,
@@ -936,34 +965,145 @@ function AttachmentImageLightbox({
 }) {
   const attachment = attachments[index];
   const hasMultiple = attachments.length > 1;
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const panSessionRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    originX: number;
+    originY: number;
+  } | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
+
+  const resetView = useCallback(() => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+    setIsPanning(false);
+    panSessionRef.current = null;
+  }, []);
+
+  const goToPrevious = useCallback(() => {
+    onIndexChange((index - 1 + attachments.length) % attachments.length);
+  }, [attachments.length, index, onIndexChange]);
+
+  const goToNext = useCallback(() => {
+    onIndexChange((index + 1) % attachments.length);
+  }, [attachments.length, index, onIndexChange]);
+
+  const adjustZoom = useCallback((delta: number) => {
+    setZoom((current) => {
+      const next = clampLightboxZoom(Number((current + delta).toFixed(2)));
+      if (next === LIGHTBOX_MIN_ZOOM) {
+        setPan({ x: 0, y: 0 });
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    resetView();
+  }, [index, resetView]);
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        if (zoom > LIGHTBOX_MIN_ZOOM || pan.x !== 0 || pan.y !== 0) {
+          resetView();
+          return;
+        }
         onClose();
+        return;
+      }
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        adjustZoom(LIGHTBOX_ZOOM_STEP);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        adjustZoom(-LIGHTBOX_ZOOM_STEP);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetView();
         return;
       }
       if (!hasMultiple) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        onIndexChange((index - 1 + attachments.length) % attachments.length);
+        goToPrevious();
         return;
       }
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        onIndexChange((index + 1) % attachments.length);
+        goToNext();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [attachments.length, hasMultiple, index, onClose, onIndexChange]);
+  }, [adjustZoom, goToNext, goToPrevious, hasMultiple, onClose, pan.x, pan.y, resetView, zoom]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const onWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      adjustZoom(event.deltaY > 0 ? -LIGHTBOX_ZOOM_STEP : LIGHTBOX_ZOOM_STEP);
+    };
+
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, [adjustZoom]);
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (zoom <= LIGHTBOX_MIN_ZOOM || event.button !== 0) return;
+      event.preventDefault();
+      panSessionRef.current = {
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        originX: pan.x,
+        originY: pan.y,
+      };
+      setIsPanning(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [pan.x, pan.y, zoom],
+  );
+
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const session = panSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    setPan({
+      x: session.originX + event.clientX - session.startX,
+      y: session.originY + event.clientY - session.startY,
+    });
+  }, []);
+
+  const endPan = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const session = panSessionRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    panSessionRef.current = null;
+    setIsPanning(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, []);
 
   if (!attachment) return null;
 
+  const isZoomed = zoom > LIGHTBOX_MIN_ZOOM || pan.x !== 0 || pan.y !== 0;
+
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-[2.5vh]"
+      className="fixed inset-0 z-50 flex flex-col bg-black/80"
       role="dialog"
       aria-modal="true"
       aria-label="Image preview"
@@ -974,47 +1114,116 @@ function AttachmentImageLightbox({
         aria-label="Close image preview"
         onClick={onClose}
       />
-      <div className="relative z-10 flex h-[95vh] w-[95vw] flex-col items-center justify-center">
-        <Button
-          type="button"
-          size="icon-xs"
-          variant="ghost"
-          className="absolute right-2 top-2 z-20 text-white/90 hover:bg-white/10 hover:text-white"
-          onClick={onClose}
-          aria-label="Close image preview"
-        >
-          <XIcon />
-        </Button>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        className="absolute right-4 top-4 z-20 text-white/90 hover:bg-white/10 hover:text-white"
+        onClick={onClose}
+        aria-label="Close image preview"
+      >
+        <XIcon />
+      </Button>
+      <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center gap-2 px-2 pb-4 pt-4 sm:gap-4 sm:px-6">
         {hasMultiple ? (
           <Button
             type="button"
             size="icon"
             variant="ghost"
-            className="absolute left-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:left-4"
+            className="shrink-0 self-center rounded-full bg-black/50 text-white/90 hover:bg-black/70 hover:text-white"
             aria-label="Previous image"
-            onClick={() => onIndexChange((index - 1 + attachments.length) % attachments.length)}
+            onClick={goToPrevious}
           >
             <ChevronLeftIcon className="size-5" />
           </Button>
         ) : null}
-        <TrelloImagePreview
-          src={attachment.url}
-          alt={attachment.name}
-          className="max-h-full max-w-full select-none rounded-lg object-contain shadow-2xl"
-          draggable={false}
-        />
-        <p className="mt-3 max-w-full truncate text-center text-xs text-white/80">
-          {attachment.name}
-          {hasMultiple ? ` (${index + 1}/${attachments.length})` : ""}
-        </p>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center">
+          <div
+            ref={viewportRef}
+            className={`flex min-h-0 w-full flex-1 touch-none items-center justify-center overflow-hidden ${
+              zoom > LIGHTBOX_MIN_ZOOM
+                ? isPanning
+                  ? "cursor-grabbing"
+                  : "cursor-grab"
+                : "cursor-zoom-in"
+            }`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={endPan}
+            onPointerCancel={endPan}
+            onDoubleClick={() => {
+              if (isZoomed) {
+                resetView();
+                return;
+              }
+              setZoom(2);
+            }}
+          >
+            <div
+              className="max-h-full max-w-full"
+              style={{
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+                transformOrigin: "center center",
+              }}
+            >
+              <TrelloImagePreview
+                src={attachment.url}
+                alt={attachment.name}
+                className="max-h-[calc(100vh-10rem)] max-w-full select-none rounded-lg object-contain shadow-2xl"
+                draggable={false}
+              />
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-center gap-1">
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="text-white/90 hover:bg-white/10 hover:text-white"
+              onClick={() => adjustZoom(-LIGHTBOX_ZOOM_STEP)}
+              disabled={zoom <= LIGHTBOX_MIN_ZOOM}
+              aria-label="Zoom out"
+            >
+              <ZoomOutIcon className="size-4" />
+            </Button>
+            <span className="min-w-12 text-center text-xs tabular-nums text-white/80">
+              {Math.round(zoom * 100)}%
+            </span>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="text-white/90 hover:bg-white/10 hover:text-white"
+              onClick={() => adjustZoom(LIGHTBOX_ZOOM_STEP)}
+              disabled={zoom >= LIGHTBOX_MAX_ZOOM}
+              aria-label="Zoom in"
+            >
+              <ZoomInIcon className="size-4" />
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="text-white/90 hover:bg-white/10 hover:text-white"
+              onClick={resetView}
+              disabled={!isZoomed}
+            >
+              Reset
+            </Button>
+          </div>
+          <p className="mt-2 max-w-full truncate px-2 text-center text-xs text-white/80">
+            {attachment.name}
+            {hasMultiple ? ` (${index + 1}/${attachments.length})` : ""}
+          </p>
+        </div>
         {hasMultiple ? (
           <Button
             type="button"
             size="icon"
             variant="ghost"
-            className="absolute right-2 top-1/2 z-20 -translate-y-1/2 text-white/90 hover:bg-white/10 hover:text-white sm:right-4"
+            className="shrink-0 self-center rounded-full bg-black/50 text-white/90 hover:bg-black/70 hover:text-white"
             aria-label="Next image"
-            onClick={() => onIndexChange((index + 1) % attachments.length)}
+            onClick={goToNext}
           >
             <ChevronRightIcon className="size-5" />
           </Button>
