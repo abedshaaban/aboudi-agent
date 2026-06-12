@@ -14,11 +14,14 @@ import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS,
   getServerConfig,
   getServerKeybindings,
+  getServerStateSyncStatus,
   onProvidersUpdated,
   onServerConfigUpdated,
   onWelcome,
+  refreshServerState,
   resetServerStateForTests,
   startServerStateSync,
 } from "./serverState";
@@ -139,6 +142,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   resetServerStateForTests();
 });
 
@@ -212,6 +217,81 @@ describe("serverState", () => {
 
     expect(getServerConfig()).toEqual(streamedConfig);
     stop();
+  });
+
+  it("refreshes the cached config every minute while visible", async () => {
+    vi.useFakeTimers();
+    serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
+    const stop = startServerStateSync(serverApi);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(getServerConfig()).toEqual(baseServerConfig);
+
+    const refreshedConfig: ServerConfig = {
+      ...baseServerConfig,
+      cwd: "/tmp/refreshed",
+    };
+    serverApi.getConfig.mockResolvedValueOnce(refreshedConfig);
+
+    await vi.advanceTimersByTimeAsync(SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS);
+
+    expect(serverApi.getConfig).toHaveBeenCalledTimes(2);
+    expect(getServerConfig()).toEqual(refreshedConfig);
+    expect(getServerStateSyncStatus().lastSyncedAt).not.toBeNull();
+
+    stop();
+  });
+
+  it("skips background refresh while the document is hidden", async () => {
+    vi.useFakeTimers();
+    let visibilityState: DocumentVisibilityState = "hidden";
+    vi.stubGlobal("document", {
+      get visibilityState() {
+        return visibilityState;
+      },
+    });
+
+    serverApi.getConfig.mockResolvedValueOnce(baseServerConfig);
+    const stop = startServerStateSync(serverApi);
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS);
+
+    expect(serverApi.getConfig).toHaveBeenCalledTimes(1);
+
+    visibilityState = "visible";
+    const refreshedConfig: ServerConfig = {
+      ...baseServerConfig,
+      cwd: "/tmp/visible-again",
+    };
+    serverApi.getConfig.mockResolvedValueOnce(refreshedConfig);
+
+    await vi.advanceTimersByTimeAsync(SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS);
+
+    expect(serverApi.getConfig).toHaveBeenCalledTimes(2);
+    expect(getServerConfig()).toEqual(refreshedConfig);
+
+    stop();
+  });
+
+  it("deduplicates overlapping refresh requests", async () => {
+    const deferred = createDeferredPromise<ServerConfig>();
+    serverApi.getConfig.mockReturnValueOnce(deferred.promise);
+
+    const firstRefresh = refreshServerState(serverApi);
+    const secondRefresh = refreshServerState(serverApi);
+
+    expect(serverApi.getConfig).toHaveBeenCalledOnce();
+    expect(getServerStateSyncStatus().isRefreshing).toBe(true);
+
+    deferred.resolve(baseServerConfig);
+
+    await expect(firstRefresh).resolves.toEqual(baseServerConfig);
+    await expect(secondRefresh).resolves.toEqual(baseServerConfig);
+    expect(getServerStateSyncStatus()).toMatchObject({
+      isRefreshing: false,
+      lastErrorAt: null,
+    });
   });
 
   it("replays welcome events to late subscribers", async () => {

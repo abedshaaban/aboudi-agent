@@ -30,6 +30,14 @@ type ServerStateClient = Pick<
   "getConfig" | "subscribeConfig" | "subscribeLifecycle"
 >;
 
+export const SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS = 60_000;
+
+export interface ServerStateSyncStatus {
+  readonly isRefreshing: boolean;
+  readonly lastSyncedAt: number | null;
+  readonly lastErrorAt: number | null;
+}
+
 function makeStateAtom<A>(label: string, initialValue: A) {
   return Atom.make(initialValue).pipe(Atom.keepAlive, Atom.withLabel(label));
 }
@@ -70,6 +78,14 @@ export const providersUpdatedAtom = makeStateAtom<ServerProviderUpdatedPayload |
   "server-providers-updated",
   null,
 );
+export const serverStateSyncStatusAtom = makeStateAtom<ServerStateSyncStatus>(
+  "server-state-sync-status",
+  {
+    isRefreshing: false,
+    lastSyncedAt: null,
+    lastErrorAt: null,
+  },
+);
 
 export function getServerConfig(): ServerConfig | null {
   return appAtomRegistry.get(serverConfigAtom);
@@ -87,6 +103,10 @@ export function setServerConfigSnapshot(config: ServerConfig): void {
   resolveServerConfig(config);
   emitProvidersUpdated({ providers: config.providers });
   emitServerConfigUpdated(toServerConfigUpdatedPayload(config), "snapshot");
+}
+
+export function getServerStateSyncStatus(): ServerStateSyncStatus {
+  return appAtomRegistry.get(serverStateSyncStatusAtom);
 }
 
 export function applyServerConfigEvent(event: ServerConfigStreamEvent): void {
@@ -174,6 +194,7 @@ export function onProvidersUpdated(
 
 export function startServerStateSync(client: ServerStateClient): () => void {
   let disposed = false;
+  activeServerStateClient = client;
   const cleanups = [
     client.subscribeLifecycle((event) => {
       if (event.type === "welcome") {
@@ -186,19 +207,27 @@ export function startServerStateSync(client: ServerStateClient): () => void {
   ];
 
   if (getServerConfig() === null) {
-    void client
-      .getConfig()
-      .then((config) => {
-        if (disposed || getServerConfig() !== null) {
-          return;
-        }
-        setServerConfigSnapshot(config);
-      })
-      .catch(() => undefined);
+    void refreshServerState(client, {
+      applyIfConfigExists: false,
+      shouldApply: () => !disposed,
+      trackStatus: false,
+    }).catch(() => undefined);
   }
+
+  const syncTimer = globalThis.setInterval(() => {
+    if (disposed || isDocumentHidden()) {
+      return;
+    }
+
+    void refreshServerState(client, { shouldApply: () => !disposed }).catch(() => undefined);
+  }, SERVER_STATE_BACKGROUND_SYNC_INTERVAL_MS);
 
   return () => {
     disposed = true;
+    globalThis.clearInterval(syncTimer);
+    if (activeServerStateClient === client) {
+      activeServerStateClient = null;
+    }
     for (const cleanup of cleanups) {
       cleanup();
     }
@@ -208,9 +237,66 @@ export function startServerStateSync(client: ServerStateClient): () => void {
 export function resetServerStateForTests() {
   resetAppAtomRegistryForTests();
   nextServerConfigUpdatedNotificationId = 1;
+  activeServerStateClient = null;
+  activeServerStateRefresh = null;
 }
 
 let nextServerConfigUpdatedNotificationId = 1;
+let activeServerStateClient: ServerStateClient | null = null;
+let activeServerStateRefresh: Promise<ServerConfig | null> | null = null;
+
+export function refreshServerState(
+  client: ServerStateClient | null = activeServerStateClient,
+  options: {
+    readonly applyIfConfigExists?: boolean;
+    readonly shouldApply?: () => boolean;
+    readonly trackStatus?: boolean;
+  } = {},
+): Promise<ServerConfig | null> {
+  if (!client) {
+    return Promise.resolve(null);
+  }
+
+  if (activeServerStateRefresh) {
+    if (options.trackStatus ?? true) {
+      updateServerStateSyncStatus({ isRefreshing: true });
+    }
+    return activeServerStateRefresh;
+  }
+
+  const applyIfConfigExists = options.applyIfConfigExists ?? true;
+  const shouldApply = options.shouldApply ?? (() => true);
+  const trackStatus = options.trackStatus ?? true;
+  if (trackStatus) {
+    updateServerStateSyncStatus({ isRefreshing: true });
+  }
+
+  activeServerStateRefresh = client
+    .getConfig()
+    .then((config) => {
+      if (shouldApply() && (applyIfConfigExists || getServerConfig() === null)) {
+        setServerConfigSnapshot(config);
+      }
+      updateServerStateSyncStatus({
+        isRefreshing: false,
+        lastSyncedAt: Date.now(),
+        lastErrorAt: null,
+      });
+      return config;
+    })
+    .catch((error: unknown) => {
+      updateServerStateSyncStatus({
+        isRefreshing: false,
+        lastErrorAt: Date.now(),
+      });
+      throw error;
+    })
+    .finally(() => {
+      activeServerStateRefresh = null;
+    });
+
+  return activeServerStateRefresh;
+}
 
 function resolveServerConfig(config: ServerConfig): void {
   appAtomRegistry.set(serverConfigAtom, config);
@@ -229,6 +315,17 @@ function emitServerConfigUpdated(
     payload,
     source,
   });
+}
+
+function updateServerStateSyncStatus(patch: Partial<ServerStateSyncStatus>): void {
+  appAtomRegistry.set(serverStateSyncStatusAtom, {
+    ...getServerStateSyncStatus(),
+    ...patch,
+  });
+}
+
+function isDocumentHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
 function subscribeLatest<A>(
@@ -290,6 +387,10 @@ export function useServerKeybindingsConfigPath(): string | null {
 
 export function useServerObservability(): ServerConfig["observability"] | null {
   return useAtomValue(serverConfigAtom, selectObservability);
+}
+
+export function useServerStateSyncStatus(): ServerStateSyncStatus {
+  return useAtomValue(serverStateSyncStatusAtom);
 }
 
 export function useServerWelcomeSubscription(

@@ -7,6 +7,7 @@ import {
   KanbanIcon,
   ListChecksIcon,
   ListTodoIcon,
+  RefreshCwIcon,
   SearchIcon,
   SettingsIcon,
   SquareKanbanIcon,
@@ -68,7 +69,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isMacPlatform, newCommandId } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId } from "../lib/utils";
 import {
   selectProjectByRef,
   selectProjectsAcrossEnvironments,
@@ -183,7 +184,11 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
-import { useServerKeybindings } from "../rpc/serverState";
+import {
+  refreshServerState,
+  useServerKeybindings,
+  useServerStateSyncStatus,
+} from "../rpc/serverState";
 import {
   derivePhysicalProjectKey,
   deriveProjectGroupingOverrideKey,
@@ -2454,9 +2459,44 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 }: {
   isElectron: boolean;
 }) {
+  const syncStatus = useServerStateSyncStatus();
+  const handleRefreshClick = useCallback(() => {
+    void refreshServerState().catch((error: unknown) => {
+      const message =
+        error instanceof Error && error.message.trim().length > 0
+          ? error.message
+          : "Unable to refresh server state.";
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Refresh failed",
+          description: message,
+        }),
+      );
+    });
+  }, []);
+
   const wordmark = (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Refresh cached state"
+              className="inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+              disabled={syncStatus.isRefreshing}
+              onClick={handleRefreshClick}
+            />
+          }
+        >
+          <RefreshCwIcon className={cn("size-3.5", syncStatus.isRefreshing && "animate-spin")} />
+        </TooltipTrigger>
+        <TooltipPopup side="bottom" sideOffset={2}>
+          Refresh cached state
+        </TooltipPopup>
+      </Tooltip>
       <Tooltip>
         <TooltipTrigger
           render={
