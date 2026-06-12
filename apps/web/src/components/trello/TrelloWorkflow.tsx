@@ -35,6 +35,7 @@ import {
   EyeIcon,
   FileIcon,
   FilterIcon,
+  FoldHorizontalIcon,
   GripVerticalIcon,
   LayersIcon,
   ListOrderedIcon,
@@ -49,6 +50,7 @@ import {
   SquareIcon,
   TagsIcon,
   Trash2Icon,
+  UnfoldHorizontalIcon,
   XIcon,
   ZoomInIcon,
   ZoomOutIcon,
@@ -83,6 +85,7 @@ import { cn } from "~/lib/utils";
 
 import { ensureLocalApi } from "../../localApi";
 import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { useTrelloBoardCollapsedLists } from "../../trelloBoardUiState";
 import { useSettings } from "../../hooks/useSettings";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -1076,6 +1079,8 @@ function BoardPanel({
     return byList;
   }, [filteredCards]);
   const cardWorkflowByCardId = useMemo(() => buildCardWorkflowIndex(snapshot), [snapshot]);
+  const boardId = snapshot.cache.board?.id ?? snapshot.activeBoardId;
+  const { isListCollapsed, toggleListCollapsed } = useTrelloBoardCollapsedLists(boardId);
 
   const resetFilters = () => {
     setQuery("");
@@ -1350,7 +1355,7 @@ function BoardPanel({
       </div>
       <div
         ref={boardScroll.ref}
-        className="flex min-h-0 flex-1 cursor-grab touch-pan-y gap-3 overflow-x-auto overscroll-x-contain p-3"
+        className="flex min-h-0 flex-1 cursor-grab touch-pan-y items-start gap-3 overflow-x-auto overscroll-x-contain p-3"
         onPointerDown={boardScroll.onPointerDown}
         onPointerMove={boardScroll.onPointerMove}
         onPointerUp={boardScroll.onPointerUp}
@@ -1359,33 +1364,16 @@ function BoardPanel({
         {snapshot.cache.lists
           .filter((list) => !list.closed)
           .map((list) => (
-            <section
+            <BoardListColumn
               key={list.id}
-              className="flex w-72 shrink-0 flex-col rounded-lg border border-border/70 bg-muted/20"
-            >
-              <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate text-xs font-semibold">{list.name}</span>
-                <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                  {(cardsByList.get(list.id) ?? []).length}
-                </span>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-                {(cardsByList.get(list.id) ?? []).map((card) => (
-                  <BoardCard
-                    key={card.id}
-                    card={card}
-                    members={snapshot.cache.members}
-                    workflowBadge={cardWorkflowByCardId.get(card.id) ?? null}
-                    onSelect={() => setSelectedCard(card)}
-                  />
-                ))}
-                {(cardsByList.get(list.id) ?? []).length === 0 ? (
-                  <div className="rounded-md border border-dashed border-border/70 p-3 text-center text-xs text-muted-foreground">
-                    No matching cards
-                  </div>
-                ) : null}
-              </div>
-            </section>
+              list={list}
+              cards={cardsByList.get(list.id) ?? []}
+              members={snapshot.cache.members}
+              cardWorkflowByCardId={cardWorkflowByCardId}
+              collapsed={isListCollapsed(list.id)}
+              onToggleCollapsed={() => toggleListCollapsed(list.id)}
+              onSelectCard={setSelectedCard}
+            />
           ))}
       </div>
       {selectedCard ? (
@@ -2048,6 +2036,91 @@ function BoardFilters({
         </FilterFieldFooter>
       ) : null}
     </div>
+  );
+}
+
+function BoardListColumn({
+  list,
+  cards,
+  members,
+  cardWorkflowByCardId,
+  collapsed,
+  onToggleCollapsed,
+  onSelectCard,
+}: {
+  readonly list: TrelloWorkflowSnapshot["cache"]["lists"][number];
+  readonly cards: readonly TrelloCard[];
+  readonly members: readonly TrelloMember[];
+  readonly cardWorkflowByCardId: Map<string, CardWorkflowBadge>;
+  readonly collapsed: boolean;
+  readonly onToggleCollapsed: () => void;
+  readonly onSelectCard: (card: TrelloCard) => void;
+}) {
+  if (collapsed) {
+    return (
+      <section className="flex w-11 shrink-0 flex-col self-start rounded-xl bg-muted/30 py-2">
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="mx-auto shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onToggleCollapsed}
+          aria-label={`Expand ${list.name} list`}
+          title="Expand list"
+        >
+          <UnfoldHorizontalIcon className="size-3.5" />
+        </Button>
+        <button
+          type="button"
+          className="flex items-center justify-center px-1 py-2 text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onToggleCollapsed}
+          aria-label={`Expand ${list.name} list`}
+          title={list.name}
+        >
+          <span className="inline-block -rotate-90 whitespace-nowrap text-xs font-semibold">
+            {list.name}
+          </span>
+        </button>
+        <div className="pb-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
+          {cards.length}
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="flex w-72 shrink-0 flex-col self-stretch rounded-xl bg-muted/30">
+      <div className="flex items-start gap-2 px-3 py-2.5">
+        <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">{list.name}</span>
+        <Button
+          type="button"
+          size="icon-xs"
+          variant="ghost"
+          className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground"
+          onClick={onToggleCollapsed}
+          aria-label={`Collapse ${list.name} list`}
+          title="Collapse list"
+        >
+          <FoldHorizontalIcon className="size-3.5" />
+        </Button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
+        {cards.map((card) => (
+          <BoardCard
+            key={card.id}
+            card={card}
+            members={members}
+            workflowBadge={cardWorkflowByCardId.get(card.id) ?? null}
+            onSelect={() => onSelectCard(card)}
+          />
+        ))}
+        {cards.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border/70 p-3 text-center text-xs text-muted-foreground">
+            0 cards match filters
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
