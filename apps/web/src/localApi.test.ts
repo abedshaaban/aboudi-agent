@@ -271,6 +271,8 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     trelloMoveToQueue: async () => {
       throw new Error("trelloMoveToQueue not implemented in test");
     },
+    trelloReorderStack: async () => [],
+    trelloBulkMoveReadyToQueue: async () => ({ movedCount: 0 }),
     trelloStartQueue: async () => emptyTrelloSnapshot.queue,
     trelloStopQueue: async () => emptyTrelloSnapshot.queue,
     trelloPauseQueue: async () => emptyTrelloSnapshot.queue,

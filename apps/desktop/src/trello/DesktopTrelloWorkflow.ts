@@ -1,6 +1,7 @@
 // @ts-nocheck
 import type {
   TrelloAddToStackInput,
+  TrelloBulkMoveReadyToQueueResult,
   TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloBoardCache,
@@ -9,6 +10,7 @@ import type {
   TrelloQueueControlInput,
   TrelloQueueJob,
   TrelloQueueStatus,
+  TrelloReorderStackInput,
   TrelloSettingsUpdateInput,
   TrelloStackItem,
   TrelloStartQueueInput,
@@ -77,6 +79,10 @@ export interface DesktopTrelloWorkflowShape {
   readonly removeFromStack: (input: TrelloRemoveFromStackInput) => Effect.Effect<void>;
   readonly updateStackItem: (input: TrelloUpdateStackItemInput) => Effect.Effect<TrelloStackItem>;
   readonly moveToQueue: (input: TrelloMoveToQueueInput) => Effect.Effect<TrelloQueueJob>;
+  readonly reorderStack: (
+    input: TrelloReorderStackInput,
+  ) => Effect.Effect<readonly TrelloStackItem[]>;
+  readonly bulkMoveReadyToQueue: () => Effect.Effect<TrelloBulkMoveReadyToQueueResult>;
   readonly startQueue: (input: TrelloStartQueueInput) => Effect.Effect<TrelloQueueStatus>;
   readonly stopQueue: (input: TrelloQueueControlInput) => Effect.Effect<TrelloQueueStatus>;
   readonly pauseQueue: (input: TrelloQueueControlInput) => Effect.Effect<TrelloQueueStatus>;
@@ -111,6 +117,59 @@ function boardIdFromRef(boardRef: string) {
     if (boardIndex >= 0 && parts[boardIndex + 1]) return parts[boardIndex + 1];
   } catch {}
   return trimmed;
+}
+
+function createQueueJobFromStackItem(
+  item: TrelloStackItem,
+  document: TrelloWorkflowDocument,
+): TrelloQueueJob {
+  const existing = document.queue.jobs.find((job) => job.stackItemId === item.jobId);
+  if (existing) return existing;
+  const job = {
+    jobId: item.jobId,
+    stackItemId: item.jobId,
+    cardId: item.cardId,
+    cardSnapshot: item.cardSnapshot,
+    plan: item.plan,
+    state: "queued" as const,
+    branchName: null,
+    worktreePath: null,
+    threadId: null,
+    envAllocation: null,
+    logs: [`Queued at ${now()}.`],
+    errors: [],
+    finalSummary: null,
+    changedFiles: [],
+    commandsRun: [],
+    blockers: [],
+    createdAt: now(),
+    updatedAt: now(),
+    startedAt: null,
+    finishedAt: null,
+  };
+  item.state = "queued";
+  item.updatedAt = now();
+  document.queue.jobs.unshift(job);
+  return job;
+}
+
+function reorderStackItems(
+  stackItems: TrelloStackItem[],
+  jobIds: readonly TrelloStackItem["jobId"][],
+): TrelloStackItem[] {
+  if (jobIds.length !== stackItems.length) {
+    throw new Error("Stack reorder must include every stack item.");
+  }
+  const seen = new Set<TrelloStackItem["jobId"]>();
+  for (const jobId of jobIds) {
+    if (seen.has(jobId)) throw new Error("Stack reorder contains duplicate job ids.");
+    seen.add(jobId);
+  }
+  const byId = new Map(stackItems.map((item) => [item.jobId, item]));
+  for (const jobId of jobIds) {
+    if (!byId.has(jobId)) throw new Error("Stack reorder contains unknown job id.");
+  }
+  return jobIds.map((jobId) => byId.get(jobId)!);
 }
 
 function defaultDocument(): TrelloWorkflowDocument {
@@ -705,34 +764,20 @@ export const layer = Layer.effect(
         persist(async (document) => {
           const item = document.stackItems.find((candidate) => candidate.jobId === input.jobId);
           if (!item) throw new Error("Stack item not found.");
-          const existing = document.queue.jobs.find((job) => job.stackItemId === item.jobId);
-          if (existing) return existing;
-          const job = {
-            jobId: item.jobId,
-            stackItemId: item.jobId,
-            cardId: item.cardId,
-            cardSnapshot: item.cardSnapshot,
-            plan: item.plan,
-            state: "queued",
-            branchName: null,
-            worktreePath: null,
-            threadId: null,
-            envAllocation: null,
-            logs: [`Queued at ${now()}.`],
-            errors: [],
-            finalSummary: null,
-            changedFiles: [],
-            commandsRun: [],
-            blockers: [],
-            createdAt: now(),
-            updatedAt: now(),
-            startedAt: null,
-            finishedAt: null,
-          };
-          item.state = "queued";
-          item.updatedAt = now();
-          document.queue.jobs.unshift(job);
-          return job;
+          return createQueueJobFromStackItem(item, document);
+        }),
+      reorderStack: (input) =>
+        persist(async (document) => {
+          document.stackItems = reorderStackItems(document.stackItems, input.jobIds);
+          return document.stackItems;
+        }),
+      bulkMoveReadyToQueue: () =>
+        persist(async (document) => {
+          const readyItems = document.stackItems.filter((item) => item.state === "ready_for_queue");
+          for (const item of [...readyItems].toReversed()) {
+            createQueueJobFromStackItem(item, document);
+          }
+          return { movedCount: readyItems.length } satisfies TrelloBulkMoveReadyToQueueResult;
         }),
       startQueue: (input) =>
         persist(async (document) => {

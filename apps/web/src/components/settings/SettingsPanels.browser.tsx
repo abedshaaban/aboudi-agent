@@ -495,6 +495,8 @@ const createDesktopBridgeStub = (overrides?: {
       .fn()
       .mockRejectedValue(new Error("trelloUpdateStackItem not implemented")),
     trelloMoveToQueue: vi.fn().mockRejectedValue(new Error("trelloMoveToQueue not implemented")),
+    trelloReorderStack: vi.fn().mockResolvedValue([]),
+    trelloBulkMoveReadyToQueue: vi.fn().mockResolvedValue({ movedCount: 0 }),
     trelloStartQueue: vi.fn().mockResolvedValue({ parallelism: 1, running: false, jobs: [] }),
     trelloStopQueue: vi.fn().mockResolvedValue({ parallelism: 1, running: false, jobs: [] }),
     trelloPauseQueue: vi.fn().mockResolvedValue({ parallelism: 1, running: false, jobs: [] }),

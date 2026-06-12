@@ -155,6 +155,14 @@ function createBrowserLocalApi(rpcClient?: WsRpcClient): LocalApi {
         window.desktopBridge
           ? window.desktopBridge.trelloMoveToQueue(input)
           : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      reorderStack: (input) =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloReorderStack(input)
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
+      bulkMoveReadyToQueue: () =>
+        window.desktopBridge
+          ? window.desktopBridge.trelloBulkMoveReadyToQueue()
+          : Promise.reject(new Error("Trello workflow is only available in the desktop app.")),
       startQueue: (input) =>
         window.desktopBridge
           ? window.desktopBridge.trelloStartQueue(input)

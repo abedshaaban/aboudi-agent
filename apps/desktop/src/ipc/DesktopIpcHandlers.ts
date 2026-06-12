@@ -42,12 +42,14 @@ import {
 import {
   trelloAddToStack,
   trelloRemoveFromStack,
+  trelloBulkMoveReadyToQueue,
   trelloCleanupJob,
   trelloGetSnapshot,
   trelloListBoards,
   trelloMoveToQueue,
   trelloPauseQueue,
   trelloRemoveJob,
+  trelloReorderStack,
   trelloRetryJob,
   trelloStartQueue,
   trelloStopQueue,
@@ -113,6 +115,8 @@ export const installDesktopIpcHandlers = Effect.gen(function* () {
   yield* ipc.handle(trelloRemoveFromStack);
   yield* ipc.handle(trelloUpdateStackItem);
   yield* ipc.handle(trelloMoveToQueue);
+  yield* ipc.handle(trelloReorderStack);
+  yield* ipc.handle(trelloBulkMoveReadyToQueue);
   yield* ipc.handle(trelloStartQueue);
   yield* ipc.handle(trelloStopQueue);
   yield* ipc.handle(trelloPauseQueue);

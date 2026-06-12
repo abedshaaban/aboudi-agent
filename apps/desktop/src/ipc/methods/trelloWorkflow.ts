@@ -1,5 +1,6 @@
 import {
   TrelloAddToStackInput,
+  TrelloBulkMoveReadyToQueueResult,
   TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloJobIdInput,
@@ -7,6 +8,7 @@ import {
   TrelloQueueControlInput,
   TrelloQueueJob,
   TrelloQueueStatus,
+  TrelloReorderStackInput,
   TrelloSettingsUpdateInput,
   TrelloStackItem,
   TrelloStartQueueInput,
@@ -109,6 +111,26 @@ export const trelloMoveToQueue = makeIpcMethod({
   handler: Effect.fn("desktop.ipc.trello.moveToQueue")(function* (input) {
     const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
     return yield* trello.moveToQueue(input);
+  }),
+});
+
+export const trelloReorderStack = makeIpcMethod({
+  channel: IpcChannels.TRELLO_REORDER_STACK_CHANNEL,
+  payload: TrelloReorderStackInput,
+  result: Schema.Array(TrelloStackItem),
+  handler: Effect.fn("desktop.ipc.trello.reorderStack")(function* (input) {
+    const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
+    return yield* trello.reorderStack(input);
+  }),
+});
+
+export const trelloBulkMoveReadyToQueue = makeIpcMethod({
+  channel: IpcChannels.TRELLO_BULK_MOVE_READY_TO_QUEUE_CHANNEL,
+  payload: Schema.Void,
+  result: TrelloBulkMoveReadyToQueueResult,
+  handler: Effect.fn("desktop.ipc.trello.bulkMoveReadyToQueue")(function* () {
+    const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
+    return yield* trello.bulkMoveReadyToQueue();
   }),
 });
 

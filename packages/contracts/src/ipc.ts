@@ -82,10 +82,12 @@ import type {
 } from "./sourceControl.ts";
 import type {
   TrelloAddToStackInput,
+  TrelloBulkMoveReadyToQueueResult,
   TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
   TrelloJobIdInput,
   TrelloMoveToQueueInput,
+  TrelloReorderStackInput,
   TrelloQueueControlInput,
   TrelloQueueJob,
   TrelloQueueStatus,
@@ -470,6 +472,8 @@ export interface DesktopBridge {
   trelloRemoveFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
   trelloUpdateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
   trelloMoveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
+  trelloReorderStack: (input: TrelloReorderStackInput) => Promise<readonly TrelloStackItem[]>;
+  trelloBulkMoveReadyToQueue: () => Promise<TrelloBulkMoveReadyToQueueResult>;
   trelloStartQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;
   trelloStopQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
   trelloPauseQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
@@ -532,6 +536,8 @@ export interface LocalApi {
     removeFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
     updateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
     moveToQueue: (input: TrelloMoveToQueueInput) => Promise<TrelloQueueJob>;
+    reorderStack: (input: TrelloReorderStackInput) => Promise<readonly TrelloStackItem[]>;
+    bulkMoveReadyToQueue: () => Promise<TrelloBulkMoveReadyToQueueResult>;
     startQueue: (input: TrelloStartQueueInput) => Promise<TrelloQueueStatus>;
     stopQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;
     pauseQueue: (input: TrelloQueueControlInput) => Promise<TrelloQueueStatus>;

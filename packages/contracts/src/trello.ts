@@ -243,6 +243,16 @@ export const TrelloMoveToQueueInput = Schema.Struct({
 });
 export type TrelloMoveToQueueInput = typeof TrelloMoveToQueueInput.Type;
 
+export const TrelloReorderStackInput = Schema.Struct({
+  jobIds: Schema.Array(TrelloWorkflowJobId),
+});
+export type TrelloReorderStackInput = typeof TrelloReorderStackInput.Type;
+
+export const TrelloBulkMoveReadyToQueueResult = Schema.Struct({
+  movedCount: NonNegativeInt,
+});
+export type TrelloBulkMoveReadyToQueueResult = typeof TrelloBulkMoveReadyToQueueResult.Type;
+
 export const TrelloQueueControlInput = Schema.Struct({
   parallelism: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 4 })),
 });
