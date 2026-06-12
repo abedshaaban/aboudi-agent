@@ -2056,6 +2056,8 @@ function BoardListColumn({
   readonly onToggleCollapsed: () => void;
   readonly onSelectCard: (card: TrelloCard) => void;
 }) {
+  const cardCount = cards.length;
+
   if (collapsed) {
     return (
       <section className="flex w-11 shrink-0 flex-col self-start rounded-xl bg-muted/30 py-2">
@@ -2072,25 +2074,23 @@ function BoardListColumn({
         </Button>
         <button
           type="button"
-          className="flex items-center justify-center px-1 py-2 text-muted-foreground transition-colors hover:text-foreground"
+          className="flex w-full flex-col items-center px-1 py-2 text-muted-foreground transition-colors hover:text-foreground"
           onClick={onToggleCollapsed}
           aria-label={`Expand ${list.name} list`}
           title={list.name}
         >
-          <span className="inline-block -rotate-90 whitespace-nowrap text-xs font-semibold">
+          <span className="inline-block max-h-64 overflow-hidden text-xs font-semibold [text-orientation:sideways] [writing-mode:vertical-rl] rotate-180">
             {list.name}
           </span>
         </button>
-        <div className="pb-1 text-center text-xs font-medium tabular-nums text-muted-foreground">
-          {cards.length}
-        </div>
+        <BoardListCardCount count={cardCount} className="shrink-0 pb-1 text-center" />
       </section>
     );
   }
 
   return (
     <section className="flex w-72 shrink-0 flex-col self-stretch rounded-xl bg-muted/30">
-      <div className="flex items-start gap-2 px-3 py-2.5">
+      <div className="flex items-start gap-1.5 px-3 py-2.5">
         <span className="min-w-0 flex-1 text-sm font-semibold leading-snug">{list.name}</span>
         <Button
           type="button"
@@ -2103,6 +2103,7 @@ function BoardListColumn({
         >
           <FoldHorizontalIcon className="size-3.5" />
         </Button>
+        <BoardListCardCount count={cardCount} className="mt-0.5 shrink-0" />
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2">
         {cards.map((card) => (
@@ -2114,13 +2115,27 @@ function BoardListColumn({
             onSelect={() => onSelectCard(card)}
           />
         ))}
-        {cards.length === 0 ? (
+        {cardCount === 0 ? (
           <div className="rounded-md border border-dashed border-border/70 p-3 text-center text-xs text-muted-foreground">
             0 cards match filters
           </div>
         ) : null}
       </div>
     </section>
+  );
+}
+
+function BoardListCardCount({
+  count,
+  className,
+}: {
+  readonly count: number;
+  readonly className?: string;
+}) {
+  return (
+    <span className={cn("text-xs font-medium tabular-nums text-muted-foreground", className)}>
+      {count}
+    </span>
   );
 }
 
