@@ -18,7 +18,6 @@ export const TrelloWorkflowJobId = TrimmedNonEmptyString.pipe(Schema.brand("Trel
 export type TrelloWorkflowJobId = typeof TrelloWorkflowJobId.Type;
 
 export const TrelloSettings = Schema.Struct({
-  boardRef: TrimmedString,
   hasApiKey: Schema.Boolean,
   hasToken: Schema.Boolean,
   updatedAt: Schema.NullOr(IsoDateTime),
@@ -28,7 +27,6 @@ export type TrelloSettings = typeof TrelloSettings.Type;
 export const TrelloSettingsUpdateInput = Schema.Struct({
   apiKey: Schema.optionalKey(TrimmedString),
   token: Schema.optionalKey(TrimmedString),
-  boardRef: TrimmedString,
 });
 export type TrelloSettingsUpdateInput = typeof TrelloSettingsUpdateInput.Type;
 
@@ -215,11 +213,18 @@ export type TrelloQueueStatus = typeof TrelloQueueStatus.Type;
 
 export const TrelloWorkflowSnapshot = Schema.Struct({
   settings: TrelloSettings,
+  boards: Schema.Array(TrelloBoardSummary),
+  activeBoardId: Schema.NullOr(TrelloId),
   cache: TrelloBoardCache,
   stackItems: Schema.Array(TrelloStackItem),
   queue: TrelloQueueStatus,
 });
 export type TrelloWorkflowSnapshot = typeof TrelloWorkflowSnapshot.Type;
+
+export const TrelloSelectBoardInput = Schema.Struct({
+  boardId: TrelloId,
+});
+export type TrelloSelectBoardInput = typeof TrelloSelectBoardInput.Type;
 
 export const TrelloAddToStackInput = Schema.Struct({
   cardId: TrelloId,
@@ -279,6 +284,7 @@ export const TrelloTestConnectionResult = Schema.Struct({
 export type TrelloTestConnectionResult = typeof TrelloTestConnectionResult.Type;
 
 export const TrelloSyncResult = Schema.Struct({
+  boardId: TrelloId,
   syncedAt: IsoDateTime,
   cardCount: NonNegativeInt,
   listCount: NonNegativeInt,

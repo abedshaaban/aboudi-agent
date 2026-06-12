@@ -92,6 +92,7 @@ import type {
   TrelloQueueJob,
   TrelloQueueStatus,
   TrelloSettingsUpdateInput,
+  TrelloSelectBoardInput,
   TrelloStackItem,
   TrelloStartQueueInput,
   TrelloSyncResult,
@@ -466,8 +467,9 @@ export interface DesktopBridge {
   trelloGetSnapshot: () => Promise<TrelloWorkflowSnapshot>;
   trelloUpdateSettings: (input: TrelloSettingsUpdateInput) => Promise<TrelloWorkflowSnapshot>;
   trelloListBoards: () => Promise<TrelloListBoardsResult>;
+  trelloSelectBoard: (input: TrelloSelectBoardInput) => Promise<TrelloWorkflowSnapshot>;
   trelloTestConnection: () => Promise<TrelloTestConnectionResult>;
-  trelloSyncBoard: () => Promise<TrelloSyncResult>;
+  trelloSyncBoard: (input: TrelloSelectBoardInput) => Promise<TrelloSyncResult>;
   trelloAddToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
   trelloRemoveFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
   trelloUpdateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;
@@ -530,8 +532,9 @@ export interface LocalApi {
     getSnapshot: () => Promise<TrelloWorkflowSnapshot>;
     updateSettings: (input: TrelloSettingsUpdateInput) => Promise<TrelloWorkflowSnapshot>;
     listBoards: () => Promise<TrelloListBoardsResult>;
+    selectBoard: (input: TrelloSelectBoardInput) => Promise<TrelloWorkflowSnapshot>;
     testConnection: () => Promise<TrelloTestConnectionResult>;
-    syncBoard: () => Promise<TrelloSyncResult>;
+    syncBoard: (input: TrelloSelectBoardInput) => Promise<TrelloSyncResult>;
     addToStack: (input: TrelloAddToStackInput) => Promise<TrelloStackItem>;
     removeFromStack: (input: TrelloRemoveFromStackInput) => Promise<void>;
     updateStackItem: (input: TrelloUpdateStackItemInput) => Promise<TrelloStackItem>;

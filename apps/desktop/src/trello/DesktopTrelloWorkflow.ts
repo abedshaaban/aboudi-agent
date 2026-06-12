@@ -4,6 +4,7 @@ import type {
   TrelloBulkMoveReadyToQueueResult,
   TrelloRemoveFromStackInput,
   TrelloListBoardsResult,
+  TrelloBoardSummary,
   TrelloBoardCache,
   TrelloJobIdInput,
   TrelloMoveToQueueInput,
@@ -12,6 +13,7 @@ import type {
   TrelloQueueStatus,
   TrelloReorderStackInput,
   TrelloSettingsUpdateInput,
+  TrelloSelectBoardInput,
   TrelloStackItem,
   TrelloStartQueueInput,
   TrelloSyncResult,
@@ -52,11 +54,12 @@ const emptyCache: TrelloBoardCache = {
 
 interface TrelloWorkflowDocument {
   readonly version: number;
-  readonly boardRef: string;
+  activeBoardId: string | null;
   readonly updatedAt: string | null;
   readonly encryptedApiKey?: string;
   readonly encryptedToken?: string;
-  readonly cache: TrelloBoardCache;
+  boards: TrelloBoardSummary[];
+  boardCaches: Record<string, TrelloBoardCache>;
   readonly stackItems: TrelloStackItem[];
   readonly queue: TrelloQueueStatus;
 }
@@ -73,8 +76,9 @@ export interface DesktopTrelloWorkflowShape {
     input: TrelloSettingsUpdateInput,
   ) => Effect.Effect<TrelloWorkflowSnapshot>;
   readonly listBoards: () => Effect.Effect<TrelloListBoardsResult>;
+  readonly selectBoard: (input: TrelloSelectBoardInput) => Effect.Effect<TrelloWorkflowSnapshot>;
   readonly testConnection: () => Effect.Effect<TrelloTestConnectionResult>;
-  readonly syncBoard: () => Effect.Effect<TrelloSyncResult>;
+  readonly syncBoard: (input: TrelloSelectBoardInput) => Effect.Effect<TrelloSyncResult>;
   readonly addToStack: (input: TrelloAddToStackInput) => Effect.Effect<TrelloStackItem>;
   readonly removeFromStack: (input: TrelloRemoveFromStackInput) => Effect.Effect<void>;
   readonly updateStackItem: (input: TrelloUpdateStackItemInput) => Effect.Effect<TrelloStackItem>;
@@ -105,18 +109,6 @@ function slugify(value: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
-}
-
-function boardIdFromRef(boardRef: string) {
-  const trimmed = boardRef.trim();
-  if (!trimmed) return "";
-  try {
-    const url = new URL(trimmed);
-    const parts = url.pathname.split("/").filter(Boolean);
-    const boardIndex = parts.indexOf("b");
-    if (boardIndex >= 0 && parts[boardIndex + 1]) return parts[boardIndex + 1];
-  } catch {}
-  return trimmed;
 }
 
 function createQueueJobFromStackItem(
@@ -174,10 +166,11 @@ function reorderStackItems(
 
 function defaultDocument(): TrelloWorkflowDocument {
   return {
-    version: 1,
-    boardRef: "",
+    version: 2,
+    activeBoardId: null,
     updatedAt: null,
-    cache: emptyCache,
+    boards: [],
+    boardCaches: {},
     stackItems: [],
     queue: { parallelism: 1, running: false, jobs: [] },
   };
@@ -237,10 +230,37 @@ export const layer = Layer.effect(
       try {
         const raw = await Fs.readFile(documentPath, "utf8");
         const parsed = JSON.parse(raw);
+        const migratedBoardCache =
+          parsed.cache?.board?.id && !parsed.boardCaches?.[parsed.cache.board.id]
+            ? { [parsed.cache.board.id]: { ...emptyCache, ...parsed.cache } }
+            : {};
+        const migratedBoards =
+          Array.isArray(parsed.boards) && parsed.boards.length > 0
+            ? parsed.boards
+            : parsed.cache?.board
+              ? [
+                  {
+                    id: parsed.cache.board.id,
+                    name: parsed.cache.board.name ?? "",
+                    url: parsed.cache.board.url ?? "",
+                    closed: false,
+                  },
+                ]
+              : [];
+        const activeBoardId =
+          typeof parsed.activeBoardId === "string"
+            ? parsed.activeBoardId
+            : (parsed.cache?.board?.id ?? null);
         return {
           ...defaultDocument(),
           ...parsed,
-          cache: { ...emptyCache, ...parsed.cache },
+          version: 2,
+          activeBoardId,
+          boards: migratedBoards,
+          boardCaches: {
+            ...migratedBoardCache,
+            ...parsed.boardCaches,
+          },
           queue: {
             parallelism: clampParallelism(parsed.queue?.parallelism ?? 1),
             running: false,
@@ -290,14 +310,20 @@ export const layer = Layer.effect(
       return await Effect.runPromise(safeStorage.decryptString(bytes));
     };
 
+    const activeCacheFromDocument = (document: TrelloWorkflowDocument): TrelloBoardCache =>
+      document.activeBoardId
+        ? (document.boardCaches[document.activeBoardId] ?? emptyCache)
+        : emptyCache;
+
     const snapshotFromDocument = (document: TrelloWorkflowDocument): TrelloWorkflowSnapshot => ({
       settings: {
-        boardRef: document.boardRef,
         hasApiKey: Boolean(document.encryptedApiKey),
         hasToken: Boolean(document.encryptedToken),
         updatedAt: document.updatedAt,
       },
-      cache: document.cache,
+      boards: document.boards,
+      activeBoardId: document.activeBoardId,
+      cache: activeCacheFromDocument(document),
       stackItems: document.stackItems,
       queue: document.queue,
     });
@@ -334,6 +360,27 @@ export const layer = Layer.effect(
         },
         catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
       });
+
+    const refreshBoards = async (document: TrelloWorkflowDocument) => {
+      const boards = await trelloFetch(
+        "/members/me/boards?fields=name,url,closed&filter=open",
+        document,
+      );
+      document.boards = boards.map((board) => ({
+        id: board.id,
+        name: board.name ?? "",
+        url: board.url ?? "",
+        closed: Boolean(board.closed),
+      }));
+      if (
+        document.activeBoardId &&
+        !document.boards.some((board) => board.id === document.activeBoardId)
+      ) {
+        document.activeBoardId = document.boards[0]?.id ?? null;
+      }
+      if (!document.activeBoardId) document.activeBoardId = document.boards[0]?.id ?? null;
+      return { boards: document.boards } satisfies TrelloListBoardsResult;
+    };
 
     const allocateEnv = async (document: TrelloWorkflowDocument, job: TrelloQueueJob) => {
       const usedPorts = new Set(
@@ -556,56 +603,58 @@ export const layer = Layer.effect(
         }),
       updateSettings: (input) =>
         persist(async (document) => {
-          document.boardRef = input.boardRef.trim();
           if (input.apiKey !== undefined && input.apiKey.trim()) {
             document.encryptedApiKey = await encryptSecret(input.apiKey.trim());
           }
           if (input.token !== undefined && input.token.trim()) {
             document.encryptedToken = await encryptSecret(input.token.trim());
           }
+          const key = await decryptSecret(document.encryptedApiKey);
+          const token = await decryptSecret(document.encryptedToken);
+          if (key && token) await refreshBoards(document);
           document.updatedAt = now();
           return snapshotFromDocument(document);
         }),
       listBoards: () =>
-        Effect.tryPromise({
-          try: async () => {
-            const document = await readDocument();
-            const boards = await trelloFetch(
-              "/members/me/boards?fields=name,url,closed&filter=open",
-              document,
-            );
-            return {
-              boards: boards.map((board) => ({
-                id: board.id,
-                name: board.name ?? "",
-                url: board.url ?? "",
-                closed: Boolean(board.closed),
-              })),
-            } satisfies TrelloListBoardsResult;
-          },
-          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+        persist(async (document) => refreshBoards(document)).pipe(
+          Effect.map((result) => result as TrelloListBoardsResult),
+        ),
+      selectBoard: (input) =>
+        persist(async (document) => {
+          if (!document.boards.some((board) => board.id === input.boardId)) {
+            await refreshBoards(document);
+          }
+          if (!document.boards.some((board) => board.id === input.boardId)) {
+            throw new Error("Trello board is not available for the saved credentials.");
+          }
+          document.activeBoardId = input.boardId;
+          document.updatedAt = now();
+          return snapshotFromDocument(document);
         }),
       testConnection: () =>
         Effect.tryPromise({
           try: async () => {
             const document = await readDocument();
-            const boardId = boardIdFromRef(document.boardRef);
-            if (!boardId) return { ok: false, message: "Set a Trello board ID or URL first." };
-            const board = await trelloFetch(
-              `/boards/${encodeURIComponent(boardId)}?fields=name,url`,
-              document,
-            );
-            return { ok: true, message: `Connected to ${board.name}.` };
+            const member = await trelloFetch("/members/me?fields=fullName,username", document);
+            return {
+              ok: true,
+              message: `Connected to ${member.fullName || member.username || "Trello"}.`,
+            };
           },
           catch: (cause) => ({
             ok: false,
             message: cause instanceof Error ? cause.message : String(cause),
           }),
         }),
-      syncBoard: () =>
+      syncBoard: (input) =>
         persist(async (document) => {
-          const boardId = boardIdFromRef(document.boardRef);
-          if (!boardId) throw new Error("Set a Trello board ID or URL first.");
+          const boardId = input.boardId;
+          if (!document.boards.some((board) => board.id === boardId)) {
+            await refreshBoards(document);
+          }
+          if (!document.boards.some((board) => board.id === boardId)) {
+            throw new Error("Trello board is not available for the saved credentials.");
+          }
           const board = await trelloFetch(
             `/boards/${encodeURIComponent(boardId)}?fields=name,url,desc`,
             document,
@@ -648,7 +697,7 @@ export const layer = Layer.effect(
             color: label.color ?? null,
           }));
           const labelById = new Map(normalizedLabels.map((label) => [label.id, label]));
-          document.cache = {
+          document.boardCaches[boardId] = {
             board: {
               id: board.id,
               name: board.name ?? "",
@@ -719,15 +768,20 @@ export const layer = Layer.effect(
             })),
             syncedAt: now(),
           };
+          document.activeBoardId = boardId;
+          document.updatedAt = now();
+          const cache = document.boardCaches[boardId];
           return {
-            syncedAt: document.cache.syncedAt,
-            cardCount: document.cache.cards.length,
-            listCount: document.cache.lists.length,
+            boardId,
+            syncedAt: cache.syncedAt,
+            cardCount: cache.cards.length,
+            listCount: cache.lists.length,
           } satisfies TrelloSyncResult;
         }),
       addToStack: (input) =>
         persist(async (document) => {
-          const card = document.cache.cards.find((candidate) => candidate.id === input.cardId);
+          const cache = activeCacheFromDocument(document);
+          const card = cache.cards.find((candidate) => candidate.id === input.cardId);
           if (!card)
             throw new Error("Trello card is not in the local cache. Sync the board first.");
           const existing = document.stackItems.find((item) => item.cardId === input.cardId);

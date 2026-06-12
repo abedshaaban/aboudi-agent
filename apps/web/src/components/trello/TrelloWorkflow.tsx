@@ -621,13 +621,11 @@ function SettingsPanel({
 }) {
   const [apiKey, setApiKey] = useState("");
   const [token, setToken] = useState("");
-  const [boardRef, setBoardRef] = useState(snapshot.settings.boardRef);
-  const [boards, setBoards] = useState<readonly TrelloBoardSummary[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
   const persistPendingSettings = async () => {
-    if (apiKey.trim() || token.trim() || boardRef !== snapshot.settings.boardRef) {
-      await getClient().updateSettings({ apiKey, token, boardRef });
+    if (apiKey.trim() || token.trim()) {
+      await getClient().updateSettings({ apiKey, token });
       setApiKey("");
       setToken("");
     }
@@ -636,7 +634,7 @@ function SettingsPanel({
   const save = async () => {
     setBusy("save");
     try {
-      await getClient().updateSettings({ apiKey, token, boardRef });
+      await getClient().updateSettings({ apiKey, token });
       toastManager.add({ type: "success", title: "Trello settings saved" });
       setApiKey("");
       setToken("");
@@ -670,7 +668,6 @@ function SettingsPanel({
     try {
       await persistPendingSettings();
       const result = await getClient().listBoards();
-      setBoards(result.boards);
       toastManager.add({
         type: "success",
         title: result.boards.length === 0 ? "No open Trello boards found" : "Trello boards loaded",
@@ -678,24 +675,6 @@ function SettingsPanel({
       await reload();
     } catch (cause) {
       notifyError("Failed to load Trello boards", cause);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const sync = async () => {
-    setBusy("sync");
-    try {
-      await persistPendingSettings();
-      const result = await getClient().syncBoard();
-      toastManager.add({
-        type: "success",
-        title: "Trello board synced",
-        description: `${result.cardCount} cards across ${result.listCount} lists`,
-      });
-      await reload();
-    } catch (cause) {
-      notifyError("Trello sync failed", cause);
     } finally {
       setBusy(null);
     }
@@ -729,45 +708,6 @@ function SettingsPanel({
             placeholder={snapshot.settings.hasToken ? "Stored locally" : ""}
           />
         </label>
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="min-w-64 flex-1 space-y-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Choose board</span>
-              <NativeSelect
-                className="h-9"
-                value={boards.some((board) => board.id === boardRef) ? boardRef : ""}
-                onChange={(event) => {
-                  const selected = boards.find((board) => board.id === event.target.value);
-                  if (selected) setBoardRef(selected.id);
-                }}
-                disabled={boards.length === 0}
-              >
-                <option value="">
-                  {boards.length === 0 ? "Load boards from Trello" : "Select a board"}
-                </option>
-                {boards.map((board) => (
-                  <option key={board.id} value={board.id}>
-                    {board.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </label>
-            <Button size="sm" variant="outline" onClick={loadBoards} disabled={busy !== null}>
-              {busy === "boards" ? (
-                <Loader2Icon className="size-4 animate-spin" />
-              ) : (
-                <RefreshCwIcon className="size-4" />
-              )}
-              Load boards
-            </Button>
-          </div>
-          <label className="block space-y-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              Board ID or URL fallback
-            </span>
-            <Input value={boardRef} onChange={(event) => setBoardRef(event.target.value)} />
-          </label>
-        </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" onClick={save} disabled={busy !== null}>
             <SettingsIcon className="size-4" />
@@ -777,14 +717,15 @@ function SettingsPanel({
             <CheckCircle2Icon className="size-4" />
             Test connection
           </Button>
-          <Button size="sm" variant="outline" onClick={sync} disabled={busy !== null}>
+          <Button size="sm" variant="outline" onClick={loadBoards} disabled={busy !== null}>
             <RefreshCwIcon className="size-4" />
-            Sync board
+            Load boards
           </Button>
         </div>
       </section>
       <section className="rounded-lg border border-border/70 p-3 text-xs text-muted-foreground">
-        Last sync: {snapshot.cache.syncedAt ?? "never"}
+        Boards available: {snapshot.boards.length} · active board:{" "}
+        {snapshot.cache.board?.name ?? "none"}
       </section>
     </div>
   );
@@ -967,11 +908,15 @@ function BoardPanel({
   const [selectedCard, setSelectedCard] = useState<TrelloCard | null>(null);
   const [credentialIssue, setCredentialIssue] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const [loadingBoards, setLoadingBoards] = useState(false);
+  const [selectingBoardId, setSelectingBoardId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [labelId, setLabelId] = useState("");
   const [memberId, setMemberId] = useState("");
   const [feature, setFeature] = useState<BoardFeatureFilter>("all");
   const credentialsMissing = !snapshot.settings.hasApiKey || !snapshot.settings.hasToken;
+  const activeBoardId = snapshot.activeBoardId;
+  const activeBoardSummary = snapshot.boards.find((board) => board.id === activeBoardId);
   const hasActiveFilters =
     query.trim().length > 0 || labelId.length > 0 || memberId.length > 0 || feature !== "all";
   const filteredCards = useMemo(() => {
@@ -1045,11 +990,52 @@ function BoardPanel({
     void navigate({ to: "/trello-settings" });
   };
 
-  const syncFromBoard = async () => {
+  const loadBoards = async () => {
+    setLoadingBoards(true);
+    setCredentialIssue(null);
+    try {
+      const result = await getClient().listBoards();
+      toastManager.add({
+        type: "success",
+        title: result.boards.length === 0 ? "No open Trello boards found" : "Trello boards loaded",
+      });
+      await reload();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Failed to load Trello boards.";
+      setCredentialIssue(message);
+      notifyError("Failed to load Trello boards", cause);
+    } finally {
+      setLoadingBoards(false);
+    }
+  };
+
+  const selectBoard = async (boardId: string) => {
+    if (!boardId || boardId === activeBoardId) return;
+    setSelectingBoardId(boardId);
+    setCredentialIssue(null);
+    try {
+      await getClient().selectBoard({ boardId: boardId as TrelloBoardSummary["id"] });
+      resetFilters();
+      setSelectedCard(null);
+      await reload();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Failed to select Trello board.";
+      setCredentialIssue(message);
+      notifyError("Failed to select Trello board", cause);
+    } finally {
+      setSelectingBoardId(null);
+    }
+  };
+
+  const syncFromBoard = async (boardId = activeBoardId) => {
+    if (!boardId) {
+      toastManager.add({ type: "error", title: "Select a Trello board first" });
+      return;
+    }
     setSyncing(true);
     setCredentialIssue(null);
     try {
-      const result = await getClient().syncBoard();
+      const result = await getClient().syncBoard({ boardId: boardId as TrelloBoardSummary["id"] });
       toastManager.add({
         type: "success",
         title: "Trello board synced",
@@ -1065,26 +1051,90 @@ function BoardPanel({
     }
   };
 
+  const boardControls = (
+    <div className="flex flex-wrap items-center gap-2">
+      <NativeSelect
+        className="h-8 min-w-64"
+        value={activeBoardId ?? ""}
+        onChange={(event) => void selectBoard(event.target.value)}
+        disabled={credentialsMissing || snapshot.boards.length === 0 || selectingBoardId !== null}
+        aria-label="Select Trello board"
+      >
+        <option value="">
+          {snapshot.boards.length === 0 ? "Load boards from Trello" : "Select a board"}
+        </option>
+        {snapshot.boards.map((board) => (
+          <option key={board.id} value={board.id}>
+            {board.name}
+          </option>
+        ))}
+      </NativeSelect>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={loadBoards}
+        disabled={credentialsMissing || loadingBoards || syncing}
+      >
+        {loadingBoards ? (
+          <Loader2Icon className="size-3.5 animate-spin" />
+        ) : (
+          <RefreshCwIcon className="size-3.5" />
+        )}
+        Boards
+      </Button>
+      <Button
+        size="xs"
+        variant="outline"
+        onClick={() => void syncFromBoard()}
+        disabled={credentialsMissing || !activeBoardId || syncing || loadingBoards}
+      >
+        {syncing ? (
+          <Loader2Icon className="size-3.5 animate-spin" />
+        ) : (
+          <RefreshCwIcon className="size-3.5" />
+        )}
+        Sync
+      </Button>
+    </div>
+  );
+
   if (!snapshot.cache.board) {
     return (
-      <TrelloBoardSetupPrompt
-        title={credentialsMissing ? "Connect Trello to load your board" : "No Trello board cached"}
-        message={
-          credentialsMissing
-            ? "Add your Trello API key and token in settings, then sync the board."
-            : (credentialIssue ??
-              "Sync your configured Trello board to cache lists, cards, comments, attachments, and checklists locally.")
-        }
-        primaryLabel={credentialsMissing || credentialIssue ? "Open Trello Settings" : "Sync board"}
-        onPrimary={credentialsMissing || credentialIssue ? goToSettings : syncFromBoard}
-        {...(credentialsMissing || credentialIssue
-          ? {}
-          : {
-              secondaryLabel: "Open Trello Settings",
-              onSecondary: goToSettings,
-            })}
-        busy={syncing}
-      />
+      <div className="flex h-full min-h-0 flex-col">
+        <div className="border-b border-border/60 px-4 py-3">{boardControls}</div>
+        <TrelloBoardSetupPrompt
+          title={
+            credentialsMissing
+              ? "Connect Trello to load your boards"
+              : activeBoardSummary
+                ? `${activeBoardSummary.name} is not cached yet`
+                : "Choose a Trello board"
+          }
+          message={
+            credentialsMissing
+              ? "Add your Trello API key and token in settings, then return here to load your boards."
+              : (credentialIssue ??
+                (snapshot.boards.length === 0
+                  ? "Load your Trello boards, choose one, then sync it locally."
+                  : "Sync the selected board to cache lists, cards, comments, attachments, and checklists locally."))
+          }
+          primaryLabel={
+            credentialsMissing
+              ? "Open Trello Settings"
+              : activeBoardId
+                ? "Sync selected board"
+                : "Load boards"
+          }
+          onPrimary={credentialsMissing ? goToSettings : activeBoardId ? syncFromBoard : loadBoards}
+          {...(credentialsMissing
+            ? {}
+            : {
+                secondaryLabel: "Open Trello Settings",
+                onSecondary: goToSettings,
+              })}
+          busy={syncing || loadingBoards || selectingBoardId !== null}
+        />
+      </div>
     );
   }
 
@@ -1098,20 +1148,7 @@ function BoardPanel({
               Cached at {snapshot.cache.syncedAt ?? "never"}
             </p>
           </div>
-          <Button
-            size="xs"
-            variant="outline"
-            className="ml-auto"
-            onClick={syncFromBoard}
-            disabled={syncing}
-          >
-            {syncing ? (
-              <Loader2Icon className="size-3.5 animate-spin" />
-            ) : (
-              <RefreshCwIcon className="size-3.5" />
-            )}
-            Sync board
-          </Button>
+          <div className="ml-auto">{boardControls}</div>
         </div>
         {credentialsMissing || credentialIssue ? (
           <TrelloCredentialsCallout

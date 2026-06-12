@@ -11,6 +11,7 @@ export const FETCH_CLOUD_AUTH_CHANNEL = "desktop:fetch-cloud-auth";
 export const TRELLO_GET_SNAPSHOT_CHANNEL = "desktop:trello-get-snapshot";
 export const TRELLO_UPDATE_SETTINGS_CHANNEL = "desktop:trello-update-settings";
 export const TRELLO_LIST_BOARDS_CHANNEL = "desktop:trello-list-boards";
+export const TRELLO_SELECT_BOARD_CHANNEL = "desktop:trello-select-board";
 export const TRELLO_TEST_CONNECTION_CHANNEL = "desktop:trello-test-connection";
 export const TRELLO_SYNC_BOARD_CHANNEL = "desktop:trello-sync-board";
 export const TRELLO_ADD_TO_STACK_CHANNEL = "desktop:trello-add-to-stack";

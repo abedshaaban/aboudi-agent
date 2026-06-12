@@ -178,7 +178,9 @@ function createLocalStorageStub(): Storage {
 }
 
 const emptyTrelloSnapshot = {
-  settings: { boardRef: "", hasApiKey: false, hasToken: false, updatedAt: null },
+  settings: { hasApiKey: false, hasToken: false, updatedAt: null },
+  boards: [],
+  activeBoardId: null,
   cache: { board: null, lists: [], cards: [], labels: [], members: [], syncedAt: null },
   stackItems: [],
   queue: { parallelism: 1, running: false, jobs: [] },
@@ -255,8 +257,10 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     trelloGetSnapshot: async () => emptyTrelloSnapshot,
     trelloUpdateSettings: async () => emptyTrelloSnapshot,
     trelloListBoards: async () => ({ boards: [] }),
+    trelloSelectBoard: async () => emptyTrelloSnapshot,
     trelloTestConnection: async () => ({ ok: true, message: "ok" }),
-    trelloSyncBoard: async () => ({
+    trelloSyncBoard: async (input) => ({
+      boardId: input.boardId,
       syncedAt: "2026-01-01T00:00:00.000Z",
       cardCount: 0,
       listCount: 0,

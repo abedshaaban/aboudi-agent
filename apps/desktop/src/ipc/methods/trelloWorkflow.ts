@@ -10,6 +10,7 @@ import {
   TrelloQueueStatus,
   TrelloReorderStackInput,
   TrelloSettingsUpdateInput,
+  TrelloSelectBoardInput,
   TrelloStackItem,
   TrelloStartQueueInput,
   TrelloSyncResult,
@@ -54,6 +55,16 @@ export const trelloListBoards = makeIpcMethod({
   }),
 });
 
+export const trelloSelectBoard = makeIpcMethod({
+  channel: IpcChannels.TRELLO_SELECT_BOARD_CHANNEL,
+  payload: TrelloSelectBoardInput,
+  result: TrelloWorkflowSnapshot,
+  handler: Effect.fn("desktop.ipc.trello.selectBoard")(function* (input) {
+    const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
+    return yield* trello.selectBoard(input);
+  }),
+});
+
 export const trelloTestConnection = makeIpcMethod({
   channel: IpcChannels.TRELLO_TEST_CONNECTION_CHANNEL,
   payload: Schema.Void,
@@ -66,11 +77,11 @@ export const trelloTestConnection = makeIpcMethod({
 
 export const trelloSyncBoard = makeIpcMethod({
   channel: IpcChannels.TRELLO_SYNC_BOARD_CHANNEL,
-  payload: Schema.Void,
+  payload: TrelloSelectBoardInput,
   result: TrelloSyncResult,
-  handler: Effect.fn("desktop.ipc.trello.syncBoard")(function* () {
+  handler: Effect.fn("desktop.ipc.trello.syncBoard")(function* (input) {
     const trello = yield* DesktopTrelloWorkflow.DesktopTrelloWorkflow;
-    return yield* trello.syncBoard();
+    return yield* trello.syncBoard(input);
   }),
 });
 
